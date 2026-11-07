@@ -386,11 +386,11 @@ connector 使用或可以使用的管理接口：
 
 设计稿（合成数据，不是实现截图；源文件见 [design/task-board-mockup.html](design/task-board-mockup.html)）：
 
-![任务看板设计稿](images/task-board-board.png)
+![任务看板设计稿](design/images/task-board-board.png)
 
-![工单详情与执行记录设计稿](images/task-board-runs.png)
+![工单详情与执行记录设计稿](design/images/task-board-runs.png)
 
-![运行时间线设计稿](images/task-board-transcript.png)
+![运行时间线设计稿](design/images/task-board-transcript.png)
 
 ## 8. 迁移
 
