@@ -12,10 +12,11 @@ export function upstreamBase(raw = 'http://127.0.0.1:3082') {
 
 /** Node HTTP pins the physical loopback target and ignores proxy environment variables. Never follows redirects. */
 export function requestJson(base, path, { method = 'GET', body, token, timeout = 6000, maxBytes = 2_097_152, signal } = {}) {
-  if (!/^\/(?:orchestrator\/api\/(?:state|tickets)(?:\?[^#]*)?|superagent-desktop-inbox\/messages)$/.test(path)) {
+  if (!/^\/(?:orchestrator\/api\/(?:state|tickets)(?:\?[^#]*)?|superagent-desktop-inbox\/(?:messages|identity))$/.test(path)) {
     return Promise.reject(new HttpError(400, 'Unsupported upstream route'))
   }
-  if (!['GET', 'POST'].includes(method) || (method === 'POST' && path !== '/superagent-desktop-inbox/messages')) {
+  if (!(method === 'GET' || (method === 'POST' && path === '/superagent-desktop-inbox/messages')
+    || (method === 'PUT' && path === '/superagent-desktop-inbox/identity'))) {
     return Promise.reject(new HttpError(405, 'Unsupported upstream method'))
   }
   if (signal?.aborted) return Promise.reject(new HttpError(504, 'Superagent request timed out'))

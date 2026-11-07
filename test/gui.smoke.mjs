@@ -18,7 +18,7 @@ try {
   catch { throw new Error('Could not authenticate the test browser') }
   const icon = page.locator('[data-dsh-panel-entry="dsh-superagent-board"]')
   await icon.waitFor({ timeout: 30000 }); await icon.click()
-  await page.getByRole('textbox', { name: '发送给现有 Superagent 的消息' }).waitFor()
+  await page.locator('.sab-composer textarea').waitFor()
   const inbox = await page.waitForResponse(r => r.url().endsWith('/@superagent-board/api/chat') && r.status() === 200, { timeout: 15000 })
   assert.ok(Array.isArray((await inbox.json()).messages))
   assert.equal(await page.locator('.sab-grid').count(), 0, 'There must not be a standalone kanban')
@@ -41,20 +41,21 @@ try {
   if (process.env.SUPERAGENT_TEST_GUARD === '1') {
     const target = owned.find(t => t.title.includes('客户端入口端到端'))
     assert.ok(target, 'Run-guard test fixture not found')
-    assert.equal(target.executions.length, 0)
+    const executionCount = target.executions.length
+    const runningSessions = board.power.runningSessions
     const result = await page.request.post(origin + '/api/task-board/action', { headers: { origin }, data: { requestId: randomUUID(), action: { kind: 'rerun', taskId: target.id } } })
     assert.equal(result.status(), 400)
     assert.match((await result.json()).error, /禁止在此重复运行/)
     const after = await (await page.request.get(origin + '/api/task-board/state', { headers: { origin } })).json()
-    assert.equal(after.tasks.find(t => t.id === target.id).executions.length, 0)
-    assert.equal(after.power.runningSessions, 0)
+    assert.equal(after.tasks.find(t => t.id === target.id).executions.length, executionCount)
+    assert.equal(after.power.runningSessions, runningSessions)
     console.log('PASS: native rerun is blocked BEFORE creating any execution or session')
   }
   // The native board folds completed source groups by default; searching intentionally expands them.
   await native.locator('input[type="search"]').fill('客户端入口端到端')
   const fixture = native.locator('[data-dsh-part="card"]').filter({ hasText: '客户端入口端到端' })
   await fixture.click()
-  await page.getByText('Superagent 外部工单', { exact: true }).waitFor()
+  await page.locator('[data-superagent-detail="true"]').waitFor()
   console.log('PASS: native card detail renders Superagent provenance and real ticket id')
   await page.keyboard.press('Escape')
   if (process.env.SUPERAGENT_TEST_DOC_SHOT === '1') {
@@ -68,7 +69,7 @@ try {
     const prompt = process.env.SUPERAGENT_TEST_PROMPT ?? '这是客户端独立入口的端到端连通性测试。请只回复“客户端入口已连接”，不要修改项目文件、不要提交或推送代码、不要创建或合并 PR。'
     const marker = process.env.SUPERAGENT_TEST_REPLY ?? '客户端入口已连接'
     const count = await page.locator('.sab-message-assistant').count()
-    await page.getByRole('textbox', { name: '发送给现有 Superagent 的消息' }).fill(prompt)
+    await page.locator('.sab-composer textarea').fill(prompt)
     const sent = page.waitForResponse(r => r.url().endsWith('/@superagent-board/api/chat') && r.request().method() === 'POST', { timeout: 15000 })
     await page.getByRole('button', { name: '发送', exact: true }).click()
     const receipt = await sent; assert.equal(receipt.status(), 202)

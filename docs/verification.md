@@ -33,6 +33,15 @@ Screenshots in this directory depict the real 0.2.x integration, not a generated
 - An independent review found that merely throwing for a due native schedule would interrupt the original global scheduler loop. Guard v2 converts scheduled refusal into an error plus disabling **only that unsafe rule**, without consuming its run budget. A local fixture verifies that the next ordinary rule remains admissible.
 - No actual recurring/one-shot tasks were created for this verification. Scheduler coverage is static path review and local fixtures, not a claim of a live cron experiment.
 
+## 0.3.0 independent identity update
+
+- 44 local tests passed, including 18 lifecycle/HTTP React-client regressions plus persistent identity, CAS revisions, narrow authorization and existing native-card rename/ownership checks.
+- The real existing GUI loaded its instance name from the new private Source identity endpoint, not the Feishu account field.
+- Explicit name-form saves updated the actual native sidebar label, heading and historical assistant bylines. A fresh client load retained that identity; a second-client update appeared automatically on the existing open page.
+- Temporary test names were restored to the original **SuperAgent** name using revision checks. The test issued **zero chat POSTs** and launched no worker task.
+- The existing native-board regression still passed with seven linked cards. Its run test now compares execution history against the pre-test baseline rather than assuming an empty history, preserving user-created audit records.
+- No uncaught browser errors occurred. Private conversations and authenticated test URLs were not published.
+
 ## Boundaries
 
 These checks are not a hostile-OS penetration test, a multi-tenant security certification, a guarantee of arbitrary credential detection, or exhaustive compatibility with future DSH/Superagent/native-board versions. The original worker/root/management-port permissions remain unchanged. Upgrading the native board requires reviewing the compatibility patch again.

@@ -63,6 +63,14 @@ Desktop options:
 
 Only literal loopback HTTP origins are accepted. No arbitrary management proxy or automatic WSL lifecycle actions.
 
+## Independent Agent name
+
+Version 0.3 reads an independent instance identity instead of hardcoding `Superagent` or borrowing the Feishu bot application name. The initial name is **SuperAgent**. Open **名称设置** (name settings) on the chat page, enter a name and explicitly save it.
+
+The authority is a persistent record in the WSL Superagent store, not browser storage. Sidebar, title, assistant bylines and hints follow it automatically (visible clients poll every 15 seconds; a confirmed save updates the current client immediately). Native-board provenance labels and unfrozen card titles follow the next status sync; titles frozen by existing execution history retain their audit record. Stable Source ids and execution ownership do not change.
+
+Saving a name does not submit a chat message, Trigger, ticket or worker run, and does not rename the Feishu bot. Revision checks prevent overwriting a concurrent edit; failed/conflicted saves retain the input for an explicit reload and retry. Names are plain text, 1–80 Unicode code points. Offline clients retain the last known name; only a client without a valid identity uses the default. Historical message bodies are not rewritten.
+
 ## Use
 
 **Superagent** opens chat; **Open Task Board** selects the existing board. Send / Ctrl+Enter submits; Enter inserts a newline. `accepted` is a received Trigger identifier, not a completed task or ticket id. Superagent can answer directly, continue an existing ticket, or create one. An uncertain POST is retried only explicitly with the same requestId; persisted intake deduplicates it.

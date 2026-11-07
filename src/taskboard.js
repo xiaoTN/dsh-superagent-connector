@@ -1,5 +1,6 @@
 /** Superagent -> the ALREADY INSTALLED task board, through its documented provider face. */
 import { boardSnapshot } from './upstream.js'
+import { DEFAULT_AGENT_NAME, projectAgentIdentity } from './identity.js'
 
 export const EXTENSION_ID = 'superagent'
 import { GUARD_CAPABILITY } from './native-guard.js'
@@ -22,20 +23,20 @@ export function statusText(ticket) {
   return '未知状态'
 }
 
-export function projection(ticket, sourceInstanceId) {
-  return { schemaVersion: 1, ticketId: ticket.id, managed: true, executionOwner: 'superagent', sourceInstanceId, stage: ticket.stage, action: ticket.action, outcome: ticket.outcome,
+export function projection(ticket, sourceInstanceId, agentName = DEFAULT_AGENT_NAME) {
+  return { schemaVersion: 1, agentName, ticketId: ticket.id, managed: true, executionOwner: 'superagent', sourceInstanceId, stage: ticket.stage, action: ticket.action, outcome: ticket.outcome,
     statusText: statusText(ticket), summary: ticket.summary.slice(0, 8000), links: ticket.threads.slice(0, 10),
     upstreamUpdatedAt: ticket.updatedAt }
 }
 
-export function mirrorTickets(host, items, sourceInstanceId = 'http://127.0.0.1:3082') {
+export function mirrorTickets(host, items, sourceInstanceId = 'http://127.0.0.1:3082', agentName = DEFAULT_AGENT_NAME) {
   const linked = new Map(host.tasks.linked().filter(row => row.payload?.managed === true && row.payload.sourceInstanceId === sourceInstanceId)
     .map(row => [row.payload.ticketId, row]))
   let created = 0, changed = 0
   for (const ticket of items) {
-    const payload = projection(ticket, sourceInstanceId)
-    const title = '[Superagent] ' + ticket.title.slice(0, 180)
-    const description = '由现有 Superagent 执行。此卡是外部状态镜像，不要在本看板重新运行或修改执行预设。\n\n'
+    const payload = projection(ticket, sourceInstanceId, agentName)
+    const title = '[' + agentName + '] ' + ticket.title.slice(0, Math.max(20, 190 - agentName.length))
+    const description = '由 ' + agentName + ' 执行。此卡是外部状态镜像，不要在本看板重新运行或修改执行预设。\n\n'
       + '状态：' + payload.statusText + '\n\n' + (ticket.summary || '暂无执行摘要')
     const row = linked.get(ticket.id)
     if (!row) {
@@ -59,17 +60,18 @@ export function mirrorTickets(host, items, sourceInstanceId = 'http://127.0.0.1:
   return { created, changed, imported: items.length }
 }
 
-export function makeTaskboardExtension(base, boardFace, snapshot = () => boardSnapshot(base)) {
+export function makeTaskboardExtension(base, boardFace, snapshot = () => boardSnapshot(base), identity = async () => ({ agent: { name: DEFAULT_AGENT_NAME }, revision: 0 })) {
   if (boardFace.externalExecutionGuard !== GUARD_CAPABILITY) throw new Error('Install and reload the version-pinned external execution guard before enabling Superagent sync')
   let timer, active = false, busy = false, host
   const sync = async () => {
     if (!active || busy) return
     busy = true
     try {
-      const board = await snapshot()
+      const [board, identityResult] = await Promise.all([snapshot(), identity()])
       if (!active) return
-      const result = mirrorTickets(host, board.items, base.origin)
-      host.publish({ state: 'ready', lastSyncedAt: new Date().toISOString(), ...result,
+      const agent = projectAgentIdentity(identityResult).agent
+      const result = mirrorTickets(host, board.items, base.origin, agent.name)
+      host.publish({ state: 'ready', agent, lastSyncedAt: new Date().toISOString(), ...result,
         truncated: board.truncated === true, readOnlyMirror: true })
     } catch {
       if (active) host.publish({ state: 'unavailable', error: 'Superagent 同步不可用；保留上次数据，不视为空任务', readOnlyMirror: true })

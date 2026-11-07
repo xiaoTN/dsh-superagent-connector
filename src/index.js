@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { HttpError, isLoopbackRequest, json, readJson, redact, validateMessage } from './security.js'
 import { boardSnapshot, requestJson, upstreamBase } from './upstream.js'
 import { makeTaskboardExtension } from './taskboard.js'
+import { projectAgentIdentity, validateAgentIdentity } from './identity.js'
 
 export const PREFIX = '/@superagent-board/api'
 export const name = 'superagent-connector'
@@ -27,7 +28,15 @@ export function handler({ base, token, connection, read = requestJson }) {
     try {
       if (!trusted(req, connection())) throw new HttpError(401, 'Sign in to the local DSH client to open Superagent')
       const path = new URL(req.url, 'http://localhost').pathname
-      if (!['GET', 'POST'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+      if (!['GET', 'POST', 'PUT'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+      if (path === PREFIX + '/identity') {
+        if (!['GET', 'PUT'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+        const secret = token()
+        const input = req.method === 'PUT' ? validateAgentIdentity(await readJson(req, 2048)) : undefined
+        if (input && input.name.includes(secret)) throw new HttpError(400, 'Credentials cannot be an Agent name')
+        const result = await read(base, '/superagent-desktop-inbox/identity', { method: req.method, token: secret, ...(input ? { body: input } : {}) })
+        return json(res, 200, projectAgentIdentity(result))
+      }
       if (path === PREFIX + '/board') {
         if (req.method !== 'GET') throw new HttpError(405, 'The board is read-only')
         if (!cache || Date.now() - cacheAt > 1500) {
@@ -39,6 +48,7 @@ export function handler({ base, token, connection, read = requestJson }) {
         return json(res, 200, cache)
       }
       if (path !== PREFIX + '/chat') throw new HttpError(404, 'Not found')
+      if (!['GET', 'POST'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
       const secret = token()
       if (req.method === 'GET') {
         const result = await read(base, '/superagent-desktop-inbox/messages', { token: secret })
@@ -61,13 +71,14 @@ export function handler({ base, token, connection, read = requestJson }) {
 
 export function apply(ctx, config = {}) {
   const base = upstreamBase(config.url)
-  ctx.effect(() => ctx.taskBoard.registerExtension(makeTaskboardExtension(base, ctx.taskBoard)), 'superagent: existing task-board provider')
   const tokenPath = config.tokenFile ?? join(homedir(), '.dsh', 'superagent-board-token')
   const token = () => {
     const value = readFileSync(tokenPath, 'utf8').trim()
     if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Private bridge token is missing or invalid')
     return value
   }
+  ctx.effect(() => ctx.taskBoard.registerExtension(makeTaskboardExtension(base, ctx.taskBoard, undefined,
+    () => requestJson(base, '/superagent-desktop-inbox/identity', { token: token() }).then(projectAgentIdentity))), 'superagent: existing task-board provider')
   ctx.effect(() => {
     const route = handler({ base, token, connection: () => ctx.get('connection') })
     return ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: route })

@@ -1,6 +1,6 @@
 {
   "name": "dsh-superagent-connector",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Superagent chat and live ticket integration for the existing DeepSeek Harness task board.",
   "type": "module",
   "main": "./src/index.js",

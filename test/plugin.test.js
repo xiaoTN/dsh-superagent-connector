@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { handler, PREFIX, trusted } from '../src/index.js'
 import { boardSnapshot, requestJson, upstreamBase } from '../src/upstream.js'
-import { makeInboxHandler, makeSource, messageView, OWNER, SOURCE, submit } from '../src/source.js'
+import { INBOX_PATH, makeInboxHandler, makeSource, messageView, OWNER, SOURCE, submit } from '../src/source.js'
 import { redact, safeLink, validateMessage } from '../src/security.js'
 
 const requestId = 'a35743da-2222-4222-8222-811bb23cfe52'
@@ -105,16 +105,16 @@ test('Source token and allowlist required; server identity cannot be chosen by c
   let allowed = false
   const handle = makeInboxHandler({ context: ctx, token, registry: { policyPart: () => ({ allowed: allowed ? [{ id: OWNER }] : [] }) } })
   let res = response()
-  await handle(req('POST', '/', message, { authorization: 'Bearer invalid' }), res)
+  await handle(req('POST', INBOX_PATH, message, { authorization: 'Bearer invalid' }), res)
   assert.equal(res.status, 401)
-  res = response(); await handle(req('POST', '/', message, { authorization: 'Bearer ' + token }), res)
+  res = response(); await handle(req('POST', INBOX_PATH, message, { authorization: 'Bearer ' + token }), res)
   assert.equal(res.status, 403)
-  allowed = true; res = response(); await handle(req('POST', '/', message, { authorization: 'Bearer ' + token }), res)
+  allowed = true; res = response(); await handle(req('POST', INBOX_PATH, message, { authorization: 'Bearer ' + token }), res)
   assert.equal(res.status, 202)
   const kind = makeSource(() => ctx)
   const outbound = { id: 'reply-1', text: 'Connected', channel: { address: { conversation: 'main' } } }
   await kind.channel.send({}, outbound); await kind.channel.send({}, outbound)
-  res = response(); await handle(req('GET', '/', undefined, { authorization: 'Bearer ' + token }), res)
+  res = response(); await handle(req('GET', INBOX_PATH, undefined, { authorization: 'Bearer ' + token }), res)
   assert.equal(res.body.messages.length, 2)
   assert.equal(res.body.messages[1].role, 'assistant')
 })

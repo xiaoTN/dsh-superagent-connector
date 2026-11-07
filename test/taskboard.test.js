@@ -68,6 +68,18 @@ test('same upstream identity updates the original native card; no second ledger 
   assert.equal(rows[0].task.executions.length, 0)
 })
 
+test('renaming the Agent updates existing card labels without changing stable identity or execution ownership', () => {
+  const { host, rows } = boardFace()
+  mirrorTickets(host, [ticket], 'instance', '第一个名字')
+  const id = rows[0].task.id
+  mirrorTickets(host, [ticket], 'instance', '后来的名字')
+  assert.equal(rows.length, 1); assert.equal(rows[0].task.id, id)
+  assert.equal(rows[0].payload.agentName, '后来的名字')
+  assert.match(rows[0].task.title, /^\[后来的名字\]/)
+  assert.equal(rows[0].payload.executionOwner, 'superagent')
+  assert.equal(rows[0].task.executions.length, 0)
+})
+
 test('same ticket identifier on another instance is not conflated; archived mirrors stay archived', () => {
   const { host, rows } = boardFace()
   mirrorTickets(host, [ticket], 'one'); mirrorTickets(host, [ticket], 'two')

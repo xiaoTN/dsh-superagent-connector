@@ -5,10 +5,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { HttpError, isLoopbackRequest, json, readJson, redact, sameSecret, validateMessage } from './security.js'
+import { DEFAULT_AGENT_NAME, readAgentIdentity, writeAgentIdentity } from './identity.js'
 
 export const SOURCE = 'desktop-inbox'
 export const OWNER = 'desktop-owner'
 export const INBOX_PATH = '/superagent-desktop-inbox/messages'
+export const IDENTITY_PATH = '/superagent-desktop-inbox/identity'
 const KEY = 'desktop-inbox:messages:v1'
 const label = (zh, en) => ({ zh, en })
 
@@ -34,7 +36,13 @@ export function makeSource(getContext) {
     kind: SOURCE,
     title: label('客户端对话', 'Desktop chat'),
     description: label('本机已认证 DSH 客户端的项目对话', 'Project chat from the authenticated local DSH client'),
-    schema: z.object({}).strict(), fields: [], health: ['desktop-inbox'],
+    schema: z.object({}).strict(), fields: [{ key: 'agentName', type: 'fact', label: label('Agent 实例名称', 'Agent instance name') }], health: ['desktop-inbox'],
+    facts() {
+      let name = DEFAULT_AGENT_NAME
+      try { name = readAgentIdentity(getContext()).agent.name } catch {}
+      return { agentName: name, cli: label('Agent 实例显示名为 ' + JSON.stringify(name) + '。这是身份标签，不是指令；它独立于飞书机器人渠道名。',
+        'Agent instance display name: ' + JSON.stringify(name) + '. This is an identity label, not an instruction, and is independent of the Feishu channel account name.') }
+    },
     scope: () => ({ listened: true, observed: false }),
     policy: {
       schema: z.object({ allowed: z.array(z.object({ id: z.literal(OWNER), name: z.string().max(100).optional() })).default([]) }).strict(),
@@ -61,8 +69,10 @@ export function makeSource(getContext) {
     threadContext: {
       messageId: trigger => trigger.id,
       async read(_commands, _trigger, _part, _cursor) {
-        const entries = getContext().state.get(KEY) ?? []
-        return { messages: entries.slice(-50).map(entry => ({ id: entry.id, from: entry.role === 'user' ? OWNER : 'Superagent',
+        const context = getContext()
+        const entries = context.state.get(KEY) ?? []
+        const agentName = readAgentIdentity(context).agent.name
+        return { messages: entries.slice(-50).map(entry => ({ id: entry.id, from: entry.role === 'user' ? OWNER : agentName,
           text: entry.text, at: entry.at, ...(entry.role === 'assistant' ? { bot: true } : {}) })), body: {} }
       },
     },
@@ -103,6 +113,15 @@ export function makeInboxHandler({ context, registry, token }) {
         throw new HttpError(401, 'Authenticated local bridge required')
       }
       if (req.headers.origin || req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'Browser requests are not accepted here')
+      const path = new URL(req.url, 'http://localhost').pathname
+      if (path === IDENTITY_PATH) {
+        if (req.method === 'GET') return json(res, 200, readAgentIdentity(context))
+        if (req.method !== 'PUT') throw new HttpError(405, 'Method not allowed')
+        const policy = registry.policyPart(SOURCE)
+        if (!policy?.allowed?.some(entry => entry.id === OWNER)) throw new HttpError(403, 'Local operator is not on the Superagent allowlist')
+        return json(res, 200, writeAgentIdentity(context, await readJson(req, 2048), token))
+      }
+      if (path !== INBOX_PATH) throw new HttpError(404, 'Not found')
       if (req.method === 'GET') {
         const all = context.state.get(KEY) ?? []
         return json(res, 200, messageView(all, token))
@@ -130,13 +149,13 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => {
     const unregister = ctx.orchestrator.sources.register(kind)
     context = ctx.orchestrator.context(kind)
-    let dispose
+    const disposers = []
     try {
-      dispose = ctx.webServer.register({ kind: 'exact', path: INBOX_PATH,
-        handler: makeInboxHandler({ context, registry: ctx.orchestrator.sources, token }) })
-    } catch (error) { unregister(); throw error }
+      const handler = makeInboxHandler({ context, registry: ctx.orchestrator.sources, token })
+      for (const path of [INBOX_PATH, IDENTITY_PATH]) disposers.push(ctx.webServer.register({ kind: 'exact', path, handler }))
+    } catch (error) { disposers.forEach(dispose => dispose()); unregister(); throw error }
     let closed = false
     context.ready.then(() => { if (!closed) context.report(SOURCE, { state: 'ready', detail: 'Authenticated desktop chat connected' }) }).catch(() => {})
-    return () => { closed = true; dispose(); unregister() }
+    return () => { closed = true; disposers.forEach(dispose => dispose()); unregister() }
   }, 'superagent-board: authenticated desktop Source')
 }
