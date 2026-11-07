@@ -1,0 +1,54 @@
+{
+  "name": "dsh-superagent-connector",
+  "version": "0.2.2",
+  "description": "Superagent chat and live ticket integration for the existing DeepSeek Harness task board.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./source": "./src/source.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "SECURITY.md",
+    "scripts/install-native-guard.mjs",
+    "docs/images"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/index.js && node --check src/source.js && node --check src/client.js && node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "license": "MIT",
+  "author": "xiaoTN",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaoTN/dsh-superagent-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaoTN/dsh-superagent-connector/issues"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

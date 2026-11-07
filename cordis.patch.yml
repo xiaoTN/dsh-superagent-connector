@@ -1,0 +1,6 @@
+- insert:
+    - id: superagent-connector
+      name: dsh-superagent-connector
+    - id: superagent-desktop-source
+      name: dsh-superagent-connector/source
+      disabled: true
