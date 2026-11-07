@@ -43,16 +43,21 @@ export function sameSecret(candidate, expected) {
 
 export function validateMessage(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some(k => !['text', 'requestId'].includes(k))) {
-    throw new HttpError(400, 'Expected text and requestId only')
+    || Object.keys(value).some(k => !['text', 'requestId', 'conversationId', 'attachments'].includes(k))) {
+    throw new HttpError(400, 'Expected text, requestId, optional conversationId and attachment receipts only')
   }
-  if (typeof value.text !== 'string' || !value.text.trim() || value.text.length > 12_000) {
+  const attachments = value.attachments ?? []
+  if (!Array.isArray(attachments) || attachments.length > 10 || new Set(attachments).size !== attachments.length
+    || attachments.some(receipt => typeof receipt !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(receipt))) throw new HttpError(400, 'Invalid Source attachment receipts')
+  if (typeof value.text !== 'string' || (!value.text.trim() && !attachments.length) || value.text.length > 12_000) {
     throw new HttpError(400, 'Message must contain 1–12000 characters')
   }
   if (typeof value.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(value.requestId)) {
     throw new HttpError(400, 'Invalid requestId')
   }
-  return { text: value.text.trim(), requestId: value.requestId }
+  if (value.conversationId !== undefined && (typeof value.conversationId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(value.conversationId))) throw new HttpError(400, 'Invalid conversation identity')
+  return { text: value.text.trim(), requestId: value.requestId, ...(value.conversationId !== undefined ? { conversationId: value.conversationId } : {}),
+    ...(value.attachments !== undefined ? { attachments } : {}) }
 }
 
 export function redact(value, secret) {

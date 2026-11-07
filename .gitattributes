@@ -1,0 +1,3 @@
+# Unified patch context uses a single-space line prefix, including empty lines.
+# Preserve that required syntax; upstream source whitespace is checked separately.
+integration-patches/*.patch whitespace=-blank-at-eol

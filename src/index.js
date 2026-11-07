@@ -5,10 +5,12 @@ import { HttpError, isLoopbackRequest, json, readJson, redact, validateMessage }
 import { boardSnapshot, requestJson, upstreamBase } from './upstream.js'
 import { makeTaskboardExtension } from './taskboard.js'
 import { projectAgentIdentity, validateAgentIdentity } from './identity.js'
+import { createSourceTransport } from './source-transport.js'
+import { createNativeHost } from './native-host.js'
 
 export const PREFIX = '/@superagent-board/api'
 export const name = 'superagent-connector'
-export const inject = ['webServer', 'connection', 'taskBoard']
+export const inject = ['webServer', 'connection', 'taskBoard', 'agents', 'sessions', 'workspaceRegistry', 'attachments']
 
 /** No loose-cookie/Origin fallback: authentication belongs to the actual DSH connection module. */
 export function trusted(req, connection) {
@@ -20,7 +22,7 @@ export function trusted(req, connection) {
   return true
 }
 
-export function handler({ base, token, connection, read = requestJson }) {
+export function handler({ base, token, connection, read = requestJson, nativeHost }) {
   let cache
   let cacheAt = 0
   let inFlight
@@ -29,6 +31,10 @@ export function handler({ base, token, connection, read = requestJson }) {
       if (!trusted(req, connection())) throw new HttpError(401, 'Sign in to the local DSH client to open Superagent')
       const path = new URL(req.url, 'http://localhost').pathname
       if (!['GET', 'POST', 'PUT'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+      if (path === PREFIX + '/native' || path.startsWith(PREFIX + '/native/')) {
+        if (!nativeHost) throw new HttpError(503, 'The native Superagent relay is unavailable')
+        return await nativeHost.handle(req, res, PREFIX + '/native')
+      }
       if (path === PREFIX + '/identity') {
         if (!['GET', 'PUT'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
         const secret = token()
@@ -56,7 +62,12 @@ export function handler({ base, token, connection, read = requestJson }) {
           throw new HttpError(502, 'Unsupported Superagent inbox format')
         }
         return json(res, 200, { messages: result.messages.slice(-200).map(m => ({ id: String(m.id), role: m.role,
-          text: redact(m.text), at: String(m.at), ...(m.status ? { status: String(m.status) } : {}) })), limit: 200, hasMore: result.hasMore === true })
+          text: redact(m.text), at: String(m.at), ...(m.status ? { status: String(m.status) } : {}),
+          ...(Number.isSafeInteger(m.seq) && m.seq > 0 ? { seq: m.seq } : {}),
+          ...(typeof m.conversationId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(m.conversationId) ? { conversationId: m.conversationId } : {}),
+          ...(['request','ack','answer','attention','result','delivery','acknowledgement','reply','notice'].includes(m.kind) ? { kind: m.kind } : {}),
+          ...(typeof m.ticketId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(m.ticketId) ? { ticketId: m.ticketId } : {}),
+          ...(typeof m.requestId === 'string' && /^[a-zA-Z0-9_-]{16,100}$/.test(m.requestId) ? { requestId: m.requestId } : {}) })), limit: 200, hasMore: result.hasMore === true })
       }
       const message = validateMessage(await readJson(req))
       const result = await read(base, '/superagent-desktop-inbox/messages', { method: 'POST', token: secret, body: message })
@@ -80,7 +91,13 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.taskBoard.registerExtension(makeTaskboardExtension(base, ctx.taskBoard, undefined,
     () => requestJson(base, '/superagent-desktop-inbox/identity', { token: token() }).then(projectAgentIdentity))), 'superagent: existing task-board provider')
   ctx.effect(() => {
-    const route = handler({ base, token, connection: () => ctx.get('connection') })
-    return ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: route })
-  }, 'superagent-board: authenticated chat and ticket projection')
+    const nativeHost = createNativeHost(ctx, { sourceInstanceId: base.origin, outboxRoot: config.outboxRoot,
+      transport: createSourceTransport({ base, token }) })
+    let unregister
+    try {
+      const route = handler({ base, token, connection: () => ctx.get('connection'), nativeHost })
+      unregister = ctx.webServer.register({ kind: 'prefix', path: PREFIX, handler: route })
+    } catch (error) { void nativeHost.dispose(); throw error }
+    return async () => { unregister(); await nativeHost.dispose() }
+  }, 'superagent: native Source conversation and authenticated ticket projection')
 }

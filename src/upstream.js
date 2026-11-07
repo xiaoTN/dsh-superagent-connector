@@ -10,12 +10,37 @@ export function upstreamBase(raw = 'http://127.0.0.1:3082') {
   return u
 }
 
+export function isScopedSourceRoute(path, method) {
+  if (typeof path !== 'string' || path.length > 1024 || path.includes('#')) return false
+  const [pathname, search = ''] = path.split('?')
+  if (path.split('?').length > 2) return false
+  const root = '/superagent-desktop-inbox/conversations'
+  if (method === 'GET' && [root, root + '/capabilities'].includes(pathname)) return !search
+  const attachment = pathname.match(/^\/superagent-desktop-inbox\/conversations\/[a-zA-Z0-9_-]{1,100}\/attachments(?:\/([a-zA-Z0-9_-]{16,128}))?$/)
+  if (attachment) {
+    if (method === 'POST') return !attachment[1] && !search
+    if (method !== 'GET' || !attachment[1]) return false
+    const query = new URLSearchParams(search)
+    return [...query.keys()].every(key => ['requestId','messageId'].includes(key) && query.getAll(key).length === 1)
+      && /^[a-zA-Z0-9_-]{16,100}$/.test(query.get('requestId') ?? '') && /^[a-zA-Z0-9_-]{1,128}$/.test(query.get('messageId') ?? '')
+  }
+  const match = pathname.match(/^\/superagent-desktop-inbox\/conversations\/([a-zA-Z0-9_-]{1,100})\/(events|receipt\/([a-zA-Z0-9_-]{16,100})|executions\/([a-zA-Z0-9_-]{1,128})(?:\/(interrupt|resume))?)$/)
+  if (!match) return false
+  if (method === 'POST') return !!match[5] && !search
+  if (method !== 'GET' || match[5]) return false
+  const allowed = match[2] === 'events' ? ['afterSeq','beforeSeq','limit'] : match[3] ? [] : ['throughSeq','beforeSeq','limit']
+  const query = new URLSearchParams(search)
+  for (const [key,value] of query) if (!allowed.includes(key) || query.getAll(key).length !== 1 || !/^(0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) return false
+  return true
+}
+
 /** Node HTTP pins the physical loopback target and ignores proxy environment variables. Never follows redirects. */
 export function requestJson(base, path, { method = 'GET', body, token, timeout = 6000, maxBytes = 2_097_152, signal } = {}) {
-  if (!/^\/(?:orchestrator\/api\/(?:state|tickets)(?:\?[^#]*)?|superagent-desktop-inbox\/(?:messages|identity))$/.test(path)) {
+  const scoped = isScopedSourceRoute(path, method)
+  if (!scoped && !/^\/(?:orchestrator\/api\/(?:state|tickets)(?:\?[^#]*)?|superagent-desktop-inbox\/(?:messages|identity))$/.test(path)) {
     return Promise.reject(new HttpError(400, 'Unsupported upstream route'))
   }
-  if (!(method === 'GET' || (method === 'POST' && path === '/superagent-desktop-inbox/messages')
+  if (!(scoped || method === 'GET' || (method === 'POST' && path === '/superagent-desktop-inbox/messages')
     || (method === 'PUT' && path === '/superagent-desktop-inbox/identity'))) {
     return Promise.reject(new HttpError(405, 'Unsupported upstream method'))
   }
@@ -28,7 +53,9 @@ export function requestJson(base, path, { method = 'GET', body, token, timeout =
         ...(bytes ? { 'content-type': 'application/json', 'content-length': bytes.length } : {}) } }, res => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.destroy()
-        const status = res.statusCode === 401 || res.statusCode === 403 ? 403 : res.statusCode === 409 ? 409 : 503
+        const status = res.statusCode === 401 || res.statusCode === 403 ? 403
+          : [400,404,409,413].includes(res.statusCode) && (scoped || path.includes('/identity')) ? res.statusCode
+          : res.statusCode === 409 ? 409 : 503
         reject(new HttpError(status, res.statusCode === 403 ? 'Superagent denied the local operator; check Source enrollment' : 'Superagent endpoint is unavailable; check connection and Source setup'))
         return
       }

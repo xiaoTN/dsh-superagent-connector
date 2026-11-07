@@ -1,6 +1,6 @@
 {
   "name": "dsh-superagent-connector",
-  "version": "0.3.0",
+  "version": "0.4.2",
   "description": "Superagent chat and live ticket integration for the existing DeepSeek Harness task board.",
   "type": "module",
   "main": "./src/index.js",
@@ -18,7 +18,11 @@
     "LICENSE",
     "SECURITY.md",
     "scripts/install-native-guard.mjs",
-    "docs/images"
+    "docs",
+    "integration-patches",
+    "experiments/native-relay",
+    "experiments/native-attachments",
+    "test"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",

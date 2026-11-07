@@ -1,0 +1,1376 @@
+diff --git a/docs/007-architecture.md b/docs/007-architecture.md
+index 184ea54..fdab2bc 100644
+--- a/docs/007-architecture.md
++++ b/docs/007-architecture.md
+@@ -194,6 +194,22 @@ Plugins receive `SourceHost`: the registry and `context(kind)`. The kind itself
+ 
+ That context supplies deployment and commands, setup readiness (`ready`, `configured`, `problem`), configuration, `receive`, `atomic`, and typed `state`. It also exposes Thread reads and metadata writes, Ticket reads and binding/closure commands, Trigger reads, `notify` through Outbox, and `report` for declared health entries.
+ 
++### Scoped execution controls
++
++`SourceContext.execution.version === 1` is the capability probe. All three methods take `threadKey` and `ticketId`; controls also require `expectedAssignmentId` and `expectedControlSeq` (initially 0). The adapter checks the registered Source kind against the stored Thread and origin Trigger, the origin Thread membership, and the Ticket subscription (never a context-only subscription). Sources remain responsible for caller authentication and conversation ownership. No method accepts a Session id or the main Session.
++
++- `read({threadKey,ticketId,cursor?,limit?})` uses alpha cold Controller `inspect` plus one `page`, or RC `events`/`page` with its exact returned cursor, never `follow` or `resolveAgent`. `limit: 0` reads only execution state and performs no Session I/O. The cursor pins `throughSeq` and optionally `beforeSeq`; records keep the actual worker seq/time. Each response is capped at 100 visible records and 128 KiB. It projects text and lifecycle facts, not reasoning, system prompts, credentials or raw tool input/output. `history`, `truncated`, `hasMore` and `nextCursor` distinguish filtered, unavailable and incomplete history. Alpha's initial `inspect` materializes the persisted prefix internally; page/output work is bounded, not that SDK's initial internal read.
++- `interrupt({threadKey,ticketId,expectedAssignmentId,expectedControlSeq})` appends `interrupted` to `Ticket.executionEvents` in the same transaction as the durable cancellation effect. Only after commit does DshExecutor cancel the worker and stop its background work, keeping its inbox. An exact replay of the last operation is idempotent; a stale Stop after continuation conflicts even though the Assignment is reused. Neither Ticket nor Assignment ends, and its Mandate and subscriptions remain.
++- `resume({threadKey,ticketId,expectedAssignmentId,expectedControlSeq})` appends `continued`, revalidates the Mandate and queues an internal continuation or the pending launch on the same Assignment. It does not retry or recreate the workspace/branch. It refuses continuation until interruption is verified settled. Text is not accepted: human instructions must enter through `Source.receive` as audited Triggers.
++
++`SourceExecutionError` exposes only fixed `name`, `status`, `code` and `message`: invalid input 400, scope refusal 403, missing execution 404, state/CAS conflict 409, operational failure 503. No internal stack/cause/path/provider detail crosses the interface.
++
++`state` describes the Assignment lifecycle; `activity` reads the existing SDK registry/preparation map as `running`, `idle`, `cold`, `preparing` or `unknown`, never by activating an Agent.
++
++A paused execution is a durable user hold, not by itself proof of SDK cancellation. `interruption` reports `requested`, `settled` or `failed`. DshExecutor stores a separate cancellation receipt under `KV.executor.interruption`, matched to the control generation. `settled` requires the SDK worker to acknowledge idle, workspace preparation to exit, no running jobs and no live subagents. Cancellation failures remain visible and the durable effect retries. The foreground interrupt waits at most one second; a longer stop remains `requested`, and callers poll state-only reads rather than claiming it stopped. An interrupted pending prepare command receives an abort signal; continuation never invents a new directory or branch.
++
++`pausedExecution` derives the hold from the last journal event for the current Assignment. Launches, deliveries, restart recovery, delayed retries, idle callbacks, worker tools and reports recheck that durable hold; asynchronous callbacks additionally compare the control journal generation. A late report cannot clear a pause or complete the Ticket. Existing management `stopTicket` (terminal) and `retryTicket` (new Assignment) keep their meanings; retry refuses an interrupted execution until explicitly continued.
++
+ ### DshExecutor
+ 
+ `DshExecutor` (`src/executor/dsh.ts`) provides one Session and directory per Ticket. `start` and `deliver` enqueue `launch` and `delivery` effects. `stop` cancels the turn through `Store.afterCommit`, so a rolled-back end does not stop the worker.
+@@ -335,6 +351,7 @@ Some generic modules still refer directly to GitHub or Feishu:
+ | `src/app/role-models.ts` | Resolves the Eval and Executor models, and seeds a new Session with its role's model |
+ | `src/app/assessment.ts` | The MasterAssessor, the assessment schema and the window `orchestrator_eval` answers |
+ | `src/app/execution-environment.ts` | The execution environment: its variables, a Ticket's values, the directory root and the lines of the prompt section, which `src/app/prompts.ts` fills into its template |
++| `src/app/source-execution.ts` | Source-scoped execution authorization, transactional controls and bounded passive worker trace |
+ | `src/app/source-context.ts` | `sourceContextOf`: each Source kind's `SourceContext` |
+ | `src/app/links.ts` | `sourceLink`, the page of a Trigger's message, and `candidateCard` |
+ | `src/app/cards.ts` | Compact cards of Triggers, Tickets, Threads and Decisions for models, the closed set of ticket card states `TICKET_STATES`, and `textPage` |
+@@ -360,6 +377,7 @@ Some generic modules still refer directly to GitHub or Feishu:
+ | `src/infra/health.ts` | The `HealthBoard`, every part's health entry, each claimed by its one writer |
+ | `src/sources/kind.ts` | The `SourceKind` protocol |
+ | `src/sources/registry.ts` | `SourceRegistry` |
++| `src/sources/execution.ts` | Versioned browser-safe Source execution interface and cursors |
+ | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
+ | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
+ | `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
+@@ -425,6 +443,7 @@ Some generic modules still refer directly to GitHub or Feishu:
+ | `tests/retry-health.spec.ts`, `tests/role-models.spec.ts` | Model budget retries, and the models of the two roles |
+ | `tests/runtime.spec.ts` | The whole application on a simulated DeepSeek Harness host, through tools and HTTP |
+ | `tests/tools.spec.ts` | The Sessions' tools: what `orchestrator_read` reads for each role, and the shapes and checks of the other main Session tools |
++| `tests/execution.spec.ts` | Nonterminal interruption/continuation, durable hold across restart, assignment guards, scoped passive trace and redaction |
+ | `tests/runtime-concurrency.spec.ts` | Work that overlaps: Triggers during a pass, Tickets that change during deliveries and launches |
+ | `tests/http.spec.ts` | The same-origin and loopback checks, the status of each kind of failure, the body limit, path parameters and queries |
+ | `tests/settings.spec.ts` | Settings saves that race a model or account check, a Policy sync that a save outran, and the refusals of the pause, a sync and a block |
+diff --git a/src/app/effects.ts b/src/app/effects.ts
+index 9255cda..aff90f7 100644
+--- a/src/app/effects.ts
++++ b/src/app/effects.ts
+@@ -13,6 +13,8 @@ export interface EffectPayloads {
+   assessment: { triggerId: string }
+   /** Launch a pending Assignment; the key is the Assignment ID. */
+   launch: { ticketId: string; assignmentId: string }
++  /** Stop a user-interrupted worker without ending its ticket; key includes the execution journal seq. */
++  interrupt: { ticketId: string; assignmentId: string; seq: number }
+   /** Hand a ticket's waiting Inputs to its running Assignment; the key is the Ticket ID. */
+   delivery: { ticketId: string }
+   /** Steer a report or a candidate into the main Session; the key is the request ID. */
+diff --git a/src/app/runtime.ts b/src/app/runtime.ts
+index a8cfe52..ff09ec4 100644
+--- a/src/app/runtime.ts
++++ b/src/app/runtime.ts
+@@ -156,7 +156,9 @@ export class Runtime extends Service implements SourceHost {
+       const evaluateDue = () => { engine.evaluateDue(); evals.set(evalsHealth(store)) }
+       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
+         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
+-      this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
++      this.sourceDeps = { store, engine, outbox, commands, sources, execution: { store, engine, controller: ctx.sessionController, activity: ticketId => executor.activity(ticketId),
++          interruptionStatus: (ticketId, seq) => executor.interruptionStatus(ticketId, seq),
++          waitForInterruption: (ticketId, assignmentId, seq) => executor.waitForInterruption(ticketId, assignmentId, seq) }, get ready() { return runtime.ready },
+         get deployment() { return setup.deployment }, configured: () => setup.configured(),
+         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
+       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+diff --git a/src/app/sessions.ts b/src/app/sessions.ts
+index 1a22388..68d3240 100644
+--- a/src/app/sessions.ts
++++ b/src/app/sessions.ts
+@@ -6,7 +6,7 @@ import { scopeParentOf } from '@deepseek-ai/dsh-scope'
+ import type { SessionId } from '@deepseek-ai/dsh-session'
+ import { dirname } from 'node:path'
+ import { z } from 'zod'
+-import { key, liveTicket, type Ticket } from '../core/index.ts'
++import { key, liveTicket, pausedExecution, type Ticket } from '../core/index.ts'
+ import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
+ import type { HealthEntry } from '../infra/health.ts'
+ import { AgentDelivery, messageId } from './delivery.ts'
+@@ -292,7 +292,8 @@ export class Sessions {
+     const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
+     return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(() => {
+       const current = store.tickets.get(ticketId)
+-      return !current || !liveTicket(current) ? 'Ticket ended; new work needs a new authorized ticket' : undefined
++      return !current || !liveTicket(current) ? 'Ticket ended; new work needs a new authorized ticket'
++         : pausedExecution(current) ? 'Execution interrupted; explicitly resume this ticket first' : undefined
+     })]
+   }
+   /**
+diff --git a/src/app/source-context.ts b/src/app/source-context.ts
+index 6f06016..9c79d2c 100644
+--- a/src/app/source-context.ts
++++ b/src/app/source-context.ts
+@@ -5,10 +5,12 @@ import type { Commands } from '../infra/commands.ts'
+ import type { SetupProblem } from '../setup.ts'
+ import type { SourceContext } from '../sources/host.ts'
+ import type { SourceRegistry } from '../sources/registry.ts'
++import { sourceExecutionOf, type SourceExecutionDeps } from './source-execution.ts'
+ import type { Outbox } from './outbox.ts'
+ import type { Store } from './store.ts'
+ 
+ export interface SourceContextDeps {
++  readonly execution: SourceExecutionDeps
+   readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read'>
+   readonly outbox: Pick<Outbox, 'send'>
+   readonly engine: Pick<EngineForSources, 'bindThread' | 'threadClosed'>
+@@ -36,6 +38,7 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
+   return {
+     get deployment() { return deps.deployment },
+     commands: deps.commands,
++    execution: sourceExecutionOf(deps.execution, kind.kind),
+     ready: deps.ready,
+     configured: () => deps.configured(),
+     get problem() { return [deps.feishuProblem, deps.setupProblem].find(problem => problem?.place === kind.kind) },
+diff --git a/src/app/tools/executor.ts b/src/app/tools/executor.ts
+index b1a6099..054b5e7 100644
+--- a/src/app/tools/executor.ts
++++ b/src/app/tools/executor.ts
+@@ -1,6 +1,6 @@
+ /** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, and reporting status. */
+ import { z } from 'zod'
+-import { liveTicket, type EngineForExecutor, type Ticket } from '../../core/index.ts'
++import { latestAssignment, liveTicket, pausedExecution, type EngineForExecutor, type Ticket } from '../../core/index.ts'
+ import { IM_WORDS } from '../../infra/text.ts'
+ import { claimPull, readPull } from '../../sources/github-pull.ts'
+ import type { SourceContext } from '../../sources/host.ts'
+@@ -85,15 +85,20 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
+       execute: async (args, signal) => {
+         const current = host.store.tickets.get(ticketId)
+         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
++        if (pausedExecution(current)) throw new Error('Execution interrupted')
++        const assignmentId = latestAssignment(current)?.id, controlSeq = current.executionEvents?.at(-1)?.seq ?? 0
+         const pull = args.pr_number != null ? await readPull(host.github, args.pr_number, signal) : undefined
+         // Claim the PR, record the report, and queue the relay atomically so a rejected PR claim or invalid report leaves no partial state, and a recorded report always reaches the main Session.
+         return host.store.atomic(() => {
++          const latest = host.store.tickets.get(ticketId)
++          if (signal.aborted || !latest || pausedExecution(latest) || (latest.executionEvents?.at(-1)?.seq ?? 0) !== controlSeq
++            || latestAssignment(latest)?.id !== assignmentId) throw new Error('Execution authorization changed before report')
+           const refused = pull && claimPull(host.github, ticketId, pull)
+           if (refused) throw new Error(refused)
+           const report = { state: args.state, summary: args.summary, ...(args.human_action !== undefined ? { question: args.human_action } : {}),
+             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
+             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}) }
+-          const updated = host.engine.report(ticketId, report)
++          const updated = host.engine.report(ticketId, report, assignmentId)
+           const relay = reportRelay(updated, report)
+           if (relay) host.sessions.relay(relay.id, relay.text)
+           const notification = relay ? 'orchestrator' : 'internal_only'
+diff --git a/src/client/locales.ts b/src/client/locales.ts
+index d81d0d4..e3c1f91 100644
+--- a/src/client/locales.ts
++++ b/src/client/locales.ts
+@@ -38,6 +38,7 @@ const TEXT = {
+   'health.runtime': ['dsh-superagent', 'dsh-superagent'],
+   'health.models': ['模型服务', 'Model service'],
+   'health.assessment': ['发给主 Session 的评估', 'Evals sent to the main Session'],
++  'health.interrupt': ['执行中断', 'Execution interruption'],
+   'health.launch': ['派工启动', 'Assignment launches'],
+   'health.delivery': ['输入送达', 'Input delivery to Assignments'],
+   'health.relay': ['转达给主 Session 的消息', 'Relays to the main Session'],
+@@ -688,6 +689,11 @@ const TEXT = {
+   'userError.unknownPromptRevision': ['没有提示词版本 {revision}。', USER_ERRORS.unknownPromptRevision[1]],
+   'userError.unknownPromptPart': ['没有内置提示词段落 {part}。', USER_ERRORS.unknownPromptPart[1]],
+   'userError.ticketEnded': ['工单已结束。', USER_ERRORS.ticketEnded[1]],
++  'userError.executionPaused': ['执行已中断，请先继续当前派工。', USER_ERRORS.executionPaused[1]],
++  'userError.staleControl': ['执行状态已变化，请读取最新状态后重试。', USER_ERRORS.staleControl[1]],
++  'userError.staleAssignment': ['当前派工已变化，请刷新后重试。', USER_ERRORS.staleAssignment[1]],
++  'userError.executionNotPaused': ['当前执行未中断。', USER_ERRORS.executionNotPaused[1]],
++  'userError.executionScope': ['执行不属于此来源、线程和工单。', USER_ERRORS.executionScope[1]],
+   'userError.assignmentEnded': ['这个派工已结束，工单已由较新的派工接手。', USER_ERRORS.assignmentEnded[1]],
+   'userError.evalFinished': ['评估 {eval} 已结束，或已被之后的评估取代；请对这个触发当前的评估做决定。', USER_ERRORS.evalFinished[1]],
+   'userError.notAdmissible': ['这个触发未通过准入：{reason}', USER_ERRORS.notAdmissible[1]],
+diff --git a/src/core/assignments.ts b/src/core/assignments.ts
+index 2264b42..6184a45 100644
+--- a/src/core/assignments.ts
++++ b/src/core/assignments.ts
+@@ -1,7 +1,7 @@
+ /** What the Executor and its workers report about the Assignments that run tickets. */
+ import { key } from './ids.ts'
+ import { UserError } from './errors.ts'
+-import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
++import { latestAssignment, liveTicket, pausedExecution, runningAssignment } from './model.ts'
+ import type { ReportState, Ticket } from './model.ts'
+ import { EnginePart, type EngineOptions } from './part.ts'
+ import type { Replies } from './replies.ts'
+@@ -34,7 +34,7 @@ export class Assignments extends EnginePart {
+   started(ticketId: string, assignmentId: string): void {
+     const ticket = this.require(ticketId)
+     const assignment = ticket.assignments.find(item => item.id === assignmentId)
+-    if (!assignment || assignment.state === 'ended') return
++    if (pausedExecution(ticket) || latestAssignment(ticket)?.id !== assignmentId || !assignment || assignment.state === 'ended') return
+     assignment.state = 'running'; assignment.startedAt ??= this.now()
+     ticket.updatedAt = this.now()
+     this.repo.tickets.save(ticket)
+@@ -59,7 +59,7 @@ export class Assignments extends EnginePart {
+   /** Records when the worker's Session of an open ticket took `inputIds` into a step, from which its model reads them. */
+   read(ticketId: string, inputIds: string[]): void {
+     const ticket = this.require(ticketId)
+-    if (!liveTicket(ticket)) return
++    if (!liveTicket(ticket) || pausedExecution(ticket)) return
+     for (const input of ticket.inputs) if (input.kind === 'trigger' && inputIds.includes(input.id)) input.readAt ||= this.now()
+     this.repo.tickets.save(ticket)
+   }
+@@ -96,9 +96,11 @@ export class Assignments extends EnginePart {
+    * @throws UserError for an unknown or ended ticket, an ended assignment, a question combined with a ready result or answer,
+    * or a question/answer referencing a non-human or unreached trigger.
+    */
+-  report(ticketId: string, report: WorkerReport): Ticket {
++  report(ticketId: string, report: WorkerReport, expectedAssignmentId?: string): Ticket {
+     const ticket = this.require(ticketId)
+     if (!liveTicket(ticket)) throw new UserError('ticketEnded')
++    if (pausedExecution(ticket)) throw new UserError('executionPaused')
++    if (expectedAssignmentId !== undefined && latestAssignment(ticket)?.id !== expectedAssignmentId) throw new UserError('staleAssignment')
+     if (report.question && (report.state === 'ready' || report.answers)) throw new UserError('questionWithResult')
+     if (report.askedBy && !report.question) throw new UserError('askerWithoutQuestion')
+     const person = (id: string, channel: boolean) => {
+@@ -135,6 +137,6 @@ export class Assignments extends EnginePart {
+   /** The ticket, while it is open and `assignmentId` runs it. */
+   private running(ticketId: string, assignmentId: string): Ticket | undefined {
+     const ticket = this.require(ticketId)
+-    return liveTicket(ticket) && runningAssignment(ticket)?.id === assignmentId ? ticket : undefined
++    return liveTicket(ticket) && !pausedExecution(ticket) && runningAssignment(ticket)?.id === assignmentId ? ticket : undefined
+   }
+ }
+diff --git a/src/core/engine.ts b/src/core/engine.ts
+index c2198ad..b2c5172 100644
+--- a/src/core/engine.ts
++++ b/src/core/engine.ts
+@@ -165,6 +165,15 @@ export class Engine {
+    */
+   retryTicket(ticketId: string): Ticket { return this.repo.atomic(() => this.tickets.retry(ticketId)) }
+ 
++  /** Interrupt current execution without ending the ticket or withdrawing its Mandate. */
++  interruptTicket(ticketId: string, expectedAssignmentId: string, expectedControlSeq: number): Ticket {
++    return this.repo.atomic(() => this.tickets.interrupt(ticketId, expectedAssignmentId, expectedControlSeq))
++  }
++  /** Continue a user-interrupted execution on its existing Assignment. */
++  resumeTicket(ticketId: string, expectedAssignmentId: string, expectedControlSeq: number): Ticket {
++    return this.repo.atomic(() => this.tickets.continue(ticketId, expectedAssignmentId, expectedControlSeq))
++  }
++
+   // The Executor
+ 
+   /**
+@@ -236,7 +245,7 @@ export class Engine {
+    * @throws UserError for an unknown or ended ticket, an ended assignment, a question that comes with a ready result or an
+    * answer, or a question or answer that names a message that is not a person's or did not reach the ticket.
+    */
+-  report(ticketId: string, report: WorkerReport): Ticket { return this.repo.atomic(() => this.assignments.report(ticketId, report)) }
++  report(ticketId: string, report: WorkerReport, expectedAssignmentId?: string): Ticket { return this.repo.atomic(() => this.assignments.report(ticketId, report, expectedAssignmentId)) }
+   /**
+    * Handles an assignment that was running when the host stopped: restarts it with a recovery note unless its latest report is
+    * `waiting`, `ready`, `blocked`, or `failed` and no Input reached its worker after that report, in which case it keeps its
+@@ -262,7 +271,7 @@ export type EngineForSources = Pick<Engine, 'receive' | 'bindThread' | 'threadCl
+ /** What the main Session asks of the Engine. */
+ export type EngineForMainSession = Pick<Engine, 'candidate' | 'candidateDelivered' | 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'>
+ /** What people ask of the Engine, through the panel or the main Session. */
+-export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
++export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'interruptTicket' | 'resumeTicket' | 'reevaluate' | 'unsubscribe' | 'dismiss'>
+ /** What Settings tells the Engine. */
+ export type EngineForSettings = Pick<Engine, 'policyChanged'>
+ /** What the Executor tells the Engine, and what its workers ask of it. */
+diff --git a/src/core/errors.ts b/src/core/errors.ts
+index 9c7096a..2910979 100644
+--- a/src/core/errors.ts
++++ b/src/core/errors.ts
+@@ -8,6 +8,11 @@ export const USER_ERRORS = {
+   unknownPromptRevision: ['missing', 'Unknown prompt revision {revision}'],
+   unknownPromptPart: ['refused', 'Unknown built-in prompt part {part}'],
+   ticketEnded: ['refused', 'Ticket has ended'],
++  executionPaused: ['refused', 'Execution is interrupted; explicitly resume this Assignment first'],
++  staleControl: ['refused', 'Execution control generation changed; read the current execution before controlling it'],
++  staleAssignment: ['refused', 'The expected Assignment no longer owns this ticket'],
++  executionNotPaused: ['refused', 'Execution is not interrupted'],
++  executionScope: ['refused', 'Execution does not belong to this Source thread and ticket'],
+   assignmentEnded: ['refused', 'Assignment has ended; a newer assignment owns this ticket'],
+   evalFinished: ['refused', 'Eval {eval} has finished or a later eval replaced it; decide the trigger\'s current eval'],
+   notAdmissible: ['refused', 'Trigger is not admissible: {reason}'],
+diff --git a/src/core/model.ts b/src/core/model.ts
+index 5778312..e401267 100644
+--- a/src/core/model.ts
++++ b/src/core/model.ts
+@@ -303,6 +303,8 @@ export interface Ticket {
+   origin: { triggerId: string; triggerIds: string[] }
+   /** What its Executor chose: its short name, directory and assignment text. */
+   execution?: Execution
++  /** Append-only execution control journal; its last event for the current Assignment is authoritative across restarts. */
++  executionEvents?: ExecutionControlEvent[]
+   /** The latest failed delivery of an Input to its worker, until a delivery succeeds. */
+   delivery?: { error: string; at: string }
+ }
+@@ -314,6 +316,14 @@ export interface Ticket {
+ export interface Follow { thread: string; own: boolean; closed?: { at: string; outcome: 'merged' | 'closed' } }
+ export interface Execution { name: string; directory: string; assignment: string }
+ 
++/** Nonterminal user controls; seq belongs only to this ticket's execution journal, not the worker Session log. */
++export interface ExecutionControlEvent { seq: number; type: 'interrupted' | 'continued'; assignmentId: string; at: string }
++/** The authoritative pause of the current Assignment; a new Assignment never inherits an earlier pause. */
++export function pausedExecution(ticket: Ticket): ExecutionControlEvent | undefined {
++  const event = ticket.executionEvents?.at(-1)
++  return !ticket.ended && event?.type === 'interrupted' && event.assignmentId === latestAssignment(ticket)?.id ? event : undefined
++}
++
+ /** Whether a ticket is open: it has not ended. */
+ export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.ended
+ /** How a ticket ended. */
+diff --git a/src/core/ports.ts b/src/core/ports.ts
+index 08c7a1c..e5a538d 100644
+--- a/src/core/ports.ts
++++ b/src/core/ports.ts
+@@ -64,6 +64,8 @@ export interface Executor {
+    * or `Engine.deliveryFailed`, and through `Engine.inputsRead` once its worker's Session takes them into a step.
+    */
+   deliver(ticket: Ticket, assignment: Assignment): void
++  /** Interrupt current work without ending the Assignment; preserve its Session and inbox. */
++  interrupt?(ticket: Ticket, assignment: Assignment): void
+   /** End an assignment's work, such as cancelling its Session's turn; called after the ticket or assignment has already ended in the domain. */
+   stop(ticket: Ticket, assignment: Assignment, reason: string): void
+ }
+@@ -89,6 +91,8 @@ export interface DomainEvents {
+   'decision.recorded': { decisionId: string; kind: DecisionKind; threadKey: string }
+   'ticket.created': { ticketId: string; decisionId: string; strength: Strength }
+   'ticket.resumed': { ticketId: string; triggerId: string }
++  'execution.interrupted': { ticketId: string; assignmentId: string }
++  'execution.continued': { ticketId: string; assignmentId: string }
+   'ticket.ended': { ticketId: string; by: TicketEndBy; outcome: TicketOutcome; reason?: string }
+   'assignment.started': { ticketId: string; assignmentId: string }
+   'assignment.ended': { ticketId: string; assignmentId: string; reason: string }
+diff --git a/src/core/tickets.ts b/src/core/tickets.ts
+index 21376e1..575bcc8 100644
+--- a/src/core/tickets.ts
++++ b/src/core/tickets.ts
+@@ -1,7 +1,7 @@
+ /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
+ import { key } from './ids.ts'
+ import { UserError } from './errors.ts'
+-import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
++import { latestAssignment, latestReport, liveTicket, pausedExecution, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+ import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
+   Trigger, TriggerDisposition } from './model.ts'
+ import type { AssessmentOutcome } from './ports.ts'
+@@ -82,7 +82,7 @@ export class Tickets extends EnginePart {
+       follow.closed = { at, outcome }
+       this.repo.tickets.save(ticket)
+       const done = this.followsDone(ticket)
+-      if (!done || this.unfinished(ticket, at)) continue
++      if (!done || pausedExecution(ticket) || this.unfinished(ticket, at)) continue
+       // Work resumed after the close and finished ends now.
+       const resumed = Date.parse(latestAssignment(ticket)?.createdAt ?? '') > Date.parse(at)
+       this.end(ticket.id, 'executor', done.outcome, resumed ? this.now() : done.at)
+@@ -149,7 +149,7 @@ export class Tickets extends EnginePart {
+    */
+   requestStatus(ticketId: string): boolean {
+     const ticket = this.require(ticketId)
+-    if (!liveTicket(ticket) || runningAssignment(ticket)?.report?.state !== 'waiting') return false
++    if (!liveTicket(ticket) || pausedExecution(ticket) || runningAssignment(ticket)?.report?.state !== 'waiting') return false
+     this.addInput(ticket, { id: `status:${ticketId}:${ticket.updatedAt}`, kind: 'text', text: STATUS_REQUEST, at: this.now() })
+     return true
+   }
+@@ -161,6 +161,50 @@ export class Tickets extends EnginePart {
+     this.end(ticketId, 'human', 'stopped', this.now(), reason)
+     return this.require(ticketId)
+   }
++  /** Nonterminal interruption: persist the user hold before queuing any cancellation. Repeats are idempotent. */
++  interrupt(ticketId: string, expectedAssignmentId: string, expectedControlSeq: number): Ticket {
++    const ticket = this.require(ticketId), assignment = latestAssignment(ticket)
++    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
++    if (!assignment || assignment.id !== expectedAssignmentId || assignment.state === 'ended') throw new UserError('staleAssignment')
++    if (this.controlReplay(ticket, expectedControlSeq, 'interrupted')) return ticket
++    if (pausedExecution(ticket)) throw new UserError('executionPaused')
++    if (!this.options.executor.interrupt) throw new Error('Executor does not support nonterminal interruption')
++    const at = this.now()
++    ticket.executionEvents = [...ticket.executionEvents ?? [], { seq: (ticket.executionEvents?.at(-1)?.seq ?? 0) + 1,
++      type: 'interrupted', assignmentId: assignment.id, at }]
++    ticket.updatedAt = at
++    this.repo.tickets.save(ticket)
++    this.emit('execution.interrupted', { ticketId, assignmentId: assignment.id })
++    this.options.executor.interrupt(ticket, assignment)
++    return ticket
++  }
++  /** Explicitly continue the same Assignment/worker/worktree; incoming human text must enter through Source.receive. */
++  continue(ticketId: string, expectedAssignmentId: string, expectedControlSeq: number): Ticket {
++    const ticket = this.require(ticketId), assignment = latestAssignment(ticket)
++    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
++    if (!assignment || assignment.id !== expectedAssignmentId || assignment.state === 'ended') throw new UserError('staleAssignment')
++    if (this.controlReplay(ticket, expectedControlSeq, 'continued')) return ticket
++    if (!pausedExecution(ticket)) throw new UserError('executionNotPaused')
++    if (!this.policy().revalidate(ticket.mandate)) throw new UserError('mandateRevoked')
++    const at = this.now(), seq = (ticket.executionEvents?.at(-1)?.seq ?? 0) + 1
++    ticket.executionEvents = [...ticket.executionEvents ?? [], { seq, type: 'continued', assignmentId: assignment.id, at }]
++    ticket.updatedAt = at
++    this.repo.tickets.save(ticket)
++    // A durable internal continuation, not a new human instruction or authorization.
++    if (assignment.state === 'pending') this.options.executor.start(ticket, assignment)
++    else this.addInput(ticket, { id: key('input', ticketId, 'continue', String(seq)), kind: 'text', at,
++      text: 'A person explicitly continued the interrupted execution. Continue the original authorized assignment from the existing Session and worktree; inspect current state and do not repeat completed external actions.' })
++    this.emit('execution.continued', { ticketId, assignmentId: assignment.id })
++    return this.require(ticketId)
++  }
++  /** A lost response can replay exactly the last control; earlier generations cannot affect a resumed execution. */
++  private controlReplay(ticket: Ticket, expected: number, type: 'interrupted' | 'continued'): boolean {
++    const last = ticket.executionEvents?.at(-1), current = last?.seq ?? 0
++    if (!Number.isSafeInteger(expected) || expected < 0) throw new UserError('staleControl')
++    if (expected === current) return false
++    if (last && last.assignmentId === latestAssignment(ticket)?.id && last.type === type && current === expected + 1) return true
++    throw new UserError('staleControl')
++  }
+   /**
+    * Ends the stalled assignment of a retryable open ticket (`failed`, `blocked`, or failed input delivery) and starts a new one.
+    * @throws UserError when the ticket is unknown or not retryable.
+@@ -168,6 +212,7 @@ export class Tickets extends EnginePart {
+   retry(ticketId: string): Ticket {
+     const ticket = this.require(ticketId)
+     const latest = latestAssignment(ticket)
++    if (pausedExecution(ticket)) throw new UserError('executionPaused')
+     if (!canRetry(ticket) || !latest) throw new UserError('notRetryable')
+     this.endAssignment(ticket, latest, 'retried')
+     this.requeueUntaken(ticket, latest)
+@@ -238,7 +283,7 @@ export class Tickets extends EnginePart {
+     const held = liveTicket(ticket) && automatic(input) && waitsForPerson(ticket)
+     if (!held) ticket.undelivered.push(input.id)
+     this.repo.tickets.save(ticket)
+-    if (!liveTicket(ticket) || held) return
++    if (!liveTicket(ticket) || held || pausedExecution(ticket)) return
+     const running = runningAssignment(ticket), latest = latestAssignment(ticket)
+     if (running) this.options.executor.deliver(ticket, running)
+     else if (latest?.state === 'pending' && !waitsForPerson(ticket)) this.options.executor.start(ticket, latest)
+diff --git a/src/executor/dsh.ts b/src/executor/dsh.ts
+index 26234f3..fe20449 100644
+--- a/src/executor/dsh.ts
++++ b/src/executor/dsh.ts
+@@ -4,12 +4,13 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import { mkdir, rmdir, stat } from 'node:fs/promises'
+ import { dirname, join } from 'node:path'
+-import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
++import { key, latestAssignment, latestReport, liveTicket, pausedExecution, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+ import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
+   from '../core/index.ts'
+ import type { Machine } from '../deployment.ts'
+ import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
+ import type { Settings } from '../policy.ts'
++import { KV } from '../kv.ts'
+ import type { Store } from '../app/store.ts'
+ import { Later, type Effects } from '../app/effects.ts'
+ import { executionRoot, type Variable } from '../app/execution-environment.ts'
+@@ -62,7 +63,7 @@ export interface ExecutorHost {
+   /** Where the Executor reports what happened to Assignments and Inputs. */
+   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
+     | 'assignmentInterrupted'>
+-  readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
++  readonly store: Pick<Store, 'tickets' | 'triggers' | 'get' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
+   /** Durable effect queue through which launches and input deliveries run. */
+   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
+   /** The `worker` health entry, which reports whether background worker event handling failed. */
+@@ -207,6 +208,8 @@ export class WorkerSlots {
+ export class DshExecutor implements Executor {
+   private readonly disposers: (() => void)[] = []
+   private readonly slots: WorkerSlots
++  /** Cancellable workspace preparation currently owned by a launch effect. */
++  private readonly launching = new Map<string, { abort: AbortController; done: Promise<void>; resolve: () => void }>()
+   /** Transient failure counts tried so far: keyed by `assignment.id` for worker turns and `launch:<assignment.id>` for launches. */
+   private readonly transient = new Map<string, number>()
+   /** Assignment IDs currently waiting on a transient-failure backoff timer before resuming their worker turn. */
+@@ -218,6 +221,7 @@ export class DshExecutor implements Executor {
+   private readonly settling = new Map<string, AbortController>()
+   /** The stops of tickets' background work that run, by ticket, which a launch or a delivery of the ticket waits for. */
+   private readonly stopping = new Map<string, Promise<void>>()
++  private readonly interrupting = new Map<string, Promise<void>>()
+   /** The jobs workers left to a person when they handed off, by ticket, and the collecting of their ends. */
+   private readonly left = new Map<string, { jobs: Set<string>; collect: AbortController }>()
+   /** When a person's message typed into a worker's Session last started a turn, by ticket. */
+@@ -232,6 +236,7 @@ export class DshExecutor implements Executor {
+     host.effects.handle('launch', payload => this.launchQueued(payload), { limit: () => host.paused() ? 0 : this.slots.launches(),
+       retry: [5000, 300_000] })
+     // Failed input deliveries are recorded on the ticket itself rather than reported through the `delivery` effect health entry (`quiet: true`).
++    host.effects.handle('interrupt', payload => this.interruptQueued(payload), { quiet: true })
+     host.effects.handle('delivery', payload => this.deliverQueued(payload.ticketId), { limit: () => host.paused() ? 0 : 4, quiet: true })
+   }
+   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
+@@ -244,13 +249,13 @@ export class DshExecutor implements Executor {
+    * A failed prepare command throws `PrepareFailed`, which is not retried automatically; an empty directory it left is removed, a non-empty one kept.
+    * @throws PrepareFailed with the command's output when the prepare command fails.
+    */
+-  private async prepareDirectory(ticket: Ticket): Promise<void> {
++  private async prepareDirectory(ticket: Ticket, launchSignal: AbortSignal): Promise<void> {
+     const directory = ticket.execution?.directory ?? ''
+     await mkdir(dirname(directory), { recursive: true })
+     const command = this.host.store.settings().executor.prepare.trim()
+     const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
+     // Enforce a timeout so a hung prepare command (such as on a credential prompt) fails the ticket instead of holding a worker slot indefinitely.
+-    const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
++    const signal = AbortSignal.any([this.host.lifetime, launchSignal, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
+     if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+       .catch(async (error: unknown) => {
+         // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.
+@@ -258,7 +263,7 @@ export class DshExecutor implements Executor {
+         throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
+       })
+     await mkdir(directory, { recursive: true })
+-    await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
++    await verifyDirectory(directory, this.host.context.subprocess, signal)
+   }
+   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
+   start(ticket: Ticket, assignment: Assignment): void {
+@@ -270,9 +275,12 @@ export class DshExecutor implements Executor {
+   private async launchQueued({ ticketId, assignmentId }: { ticketId: string; assignmentId: string }): Promise<void> {
+     const ticket = this.host.store.tickets.get(ticketId)
+     const assignment = ticket && latestAssignment(ticket)
+-    if (!ticket || !liveTicket(ticket) || assignment?.id !== assignmentId || assignment.state !== 'pending') return
++    if (!ticket || !liveTicket(ticket) || pausedExecution(ticket) || assignment?.id !== assignmentId || assignment.state !== 'pending') return
+     this.slots.reserve(ticketId, 'launch')
+-    try { await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`) }
++    const launch = { abort: new AbortController(), ...Promise.withResolvers<void>() }
++    const preparing = { abort: launch.abort, done: launch.promise, resolve: launch.resolve }
++    this.launching.set(ticketId, preparing)
++    try { await this.launch(ticket, assignment, launch.abort.signal); this.transient.delete(`launch:${assignmentId}`) }
+     catch (error) {
+       // Shutdown or pause re-queues the launch for resume, and transient network/provider errors retry with backoff.
+       // A failed prepare command is not retried automatically because an existing directory counts as prepared, so retrying
+@@ -280,8 +288,12 @@ export class DshExecutor implements Executor {
+       // ticket is marked failed and waits until new human input or an explicit retry arrives.
+       if (this.host.closing() || error instanceof Later) throw error
+       if (!(error instanceof PrepareFailed) && this.retries(`launch:${assignmentId}`, error)) throw error
+-      this.launchFailed(ticketId, assignmentId, error)
+-    } finally { this.slots.free(ticketId) }
++      if ((this.host.store.tickets.get(ticketId)?.executionEvents?.at(-1)?.seq ?? 0) === (ticket.executionEvents?.at(-1)?.seq ?? 0)) this.launchFailed(ticketId, assignmentId, error)
++    } finally {
++      launch.resolve()
++      if (this.launching.get(ticketId) === preparing) this.launching.delete(ticketId)
++      this.slots.free(ticketId)
++    }
+   }
+   /**
+    * Delivers queued inputs to a running assignment one by one, re-reading ticket state before each delivery so delivery
+@@ -291,13 +303,13 @@ export class DshExecutor implements Executor {
+     // A stop of the worker's background work ends with a cancel, which would drop what is delivered meanwhile.
+     await this.stopped(ticketId)
+     const first = this.host.store.tickets.get(ticketId)
+-    const target = first && liveTicket(first) ? runningAssignment(first) : undefined
++    const target = first && liveTicket(first) && !pausedExecution(first) ? runningAssignment(first) : undefined
+     if (!first || !target || !first.undelivered.length) return
+     let woken = false
+     try {
+       for (;;) {
+         const ticket = this.host.store.tickets.get(ticketId)
+-        const assignment = ticket && liveTicket(ticket) ? runningAssignment(ticket) : undefined
++        const assignment = ticket && liveTicket(ticket) && !pausedExecution(ticket) ? runningAssignment(ticket) : undefined
+         const inputId = ticket?.undelivered[0]
+         if (!ticket || !assignment || inputId === undefined) return
+         // Waking an idle worker reserves a slot (including the extra slot reserved for human follow-ups).
+@@ -318,7 +330,8 @@ export class DshExecutor implements Executor {
+         } catch (error) {
+           if (this.host.closing() || error instanceof Later) throw error
+           const current = this.host.store.tickets.get(ticketId)
+-          if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) return
++          if (!current || !liveTicket(current) || pausedExecution(current) || runningAssignment(current)?.id !== assignment.id
++            || (current.executionEvents?.at(-1)?.seq ?? 0) !== (ticket.executionEvents?.at(-1)?.seq ?? 0)) return
+           this.host.engine.deliveryFailed(ticketId, assignment.id, String(error))
+           throw error
+         }
+@@ -330,7 +343,8 @@ export class DshExecutor implements Executor {
+     // Re-check right before session delivery because the ticket may have ended while awaiting `sourceLink`.
+     const live = () => {
+       const current = this.host.store.tickets.get(ticket.id)
+-      if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) throw new Error('The ticket ended or another Assignment took it over')
++      if (!current || !liveTicket(current) || pausedExecution(current) || runningAssignment(current)?.id !== assignment.id
++        || (current.executionEvents?.at(-1)?.seq ?? 0) !== (ticket.executionEvents?.at(-1)?.seq ?? 0)) throw new Error('The ticket ended or another Assignment took it over')
+       // A stop of the worker's background work that started meanwhile ends with a cancel, which would drop the Input.
+       if (this.stopping.has(ticket.id)) throw new Later('The worker\'s background work is stopping')
+     }
+@@ -361,6 +375,7 @@ export class DshExecutor implements Executor {
+     const ownTurn = (report?.state === 'ready' || report?.state === 'dropped') && !busy
+     const sessionId = workerSessionId(ticket.id)
+     this.host.store.afterCommit(() => {
++      this.launching.get(ticket.id)?.abort.abort()
+       this.settling.get(ticket.id)?.abort()
+       if (!ownTurn) this.host.context.agents.get(sessionId as SessionId)?.cancel({ kind: 'user' }, { keepInbox: false })
+       // Its shell jobs and subagents stop with it, also those of a worker that ends its own turn.
+@@ -368,6 +383,65 @@ export class DshExecutor implements Executor {
+       this.left.get(ticket.id)?.collect.abort(); this.left.delete(ticket.id); this.personal.delete(ticket.id)
+     })
+   }
++  /** Persist cancellation work and immediately request cancellation after the pause transaction commits. */
++  interrupt(ticket: Ticket, assignment: Assignment): void {
++    const pause = pausedExecution(ticket)
++    if (!pause) return
++    const payload = { ticketId: ticket.id, assignmentId: assignment.id, seq: pause.seq }
++    this.host.effects.enqueue('interrupt', `${assignment.id}:${pause.seq}`, payload)
++    this.host.store.afterCommit(() => { void this.background(this.interruptQueued(payload)) })
++  }
++  private async interruptQueued({ ticketId, assignmentId, seq }: { ticketId: string; assignmentId: string; seq: number }): Promise<void> {
++    const ticket = this.host.store.tickets.get(ticketId), pause = ticket && pausedExecution(ticket)
++    if (!pause || pause.assignmentId !== assignmentId || pause.seq !== seq) return
++    const token = `${assignmentId}:${seq}`, existing = this.interrupting.get(token)
++    if (existing) { await existing; return }
++    const previous = this.stopping.get(ticketId)
++    this.transient.delete(assignmentId); this.transient.delete(`launch:${assignmentId}`); this.resuming.delete(assignmentId)
++    const launch = this.launching.get(ticketId)
++    launch?.abort.abort()
++    const receipt = (state: 'requested' | 'settled' | 'failed') => this.host.store.set(KV.executor.interruption(ticketId), { assignmentId, controlSeq: seq, state, at: now() })
++    receipt('requested')
++    this.settling.get(ticketId)?.abort()
++    this.left.get(ticketId)?.collect.abort(); this.left.delete(ticketId); this.personal.delete(ticketId)
++    // Never resolve/activate a cold Agent just to cancel it. Persisted pause guards every later launch/delivery/recovery.
++    try { this.host.context.agents.get(workerSessionId(ticketId) as SessionId)?.cancel({ kind: 'user' }, { keepInbox: true }) }
++    catch (error) { receipt('failed'); throw error }
++    const stop = (async () => {
++      if (previous) await previous
++      const sessionId = workerSessionId(ticketId)
++      await stopBackground(this.host.context, sessionId, 'Execution interrupted by a person', true)
++      const agent = this.host.context.agents.get(sessionId as SessionId)
++      if (agent && (await until(agent.whenIdle(), undefined, SHUTDOWN_STOP_MS) === false || agent.status !== 'idle')) throw new Error('Worker did not acknowledge interruption')
++      if (launch && await until(launch.done, undefined, SHUTDOWN_STOP_MS) === false) throw new Error('Preparation did not acknowledge interruption')
++      if (runningJobs(this.host.context, sessionId).length) throw new Error('Worker jobs did not stop')
++      const subagents = this.host.context.get('subagents') as { listChildren(id: string): Promise<readonly { id: string }[]> } | undefined
++      if (subagents) {
++        const children = await until(subagents.listChildren(sessionId), undefined, SHUTDOWN_STOP_MS)
++        if (children === false || children.some(child => this.host.context.agents.get(child.id as SessionId))) throw new Error('Worker subagents did not stop')
++      }
++      receipt('settled')
++    })()
++    this.interrupting.set(token, stop)
++    this.track(ticketId, stop)
++    try { await stop } catch (error) { receipt('failed'); throw error } finally { if (this.interrupting.get(token) === stop) this.interrupting.delete(token) }
++  }
++  /** Read only the existing registry and preparation map; never resolve or activate a cold Session. */
++  activity(ticketId: string): 'running' | 'idle' | 'cold' | 'preparing' {
++    if (this.launching.has(ticketId)) return 'preparing'
++    const agent = this.host.context.agents.get(workerSessionId(ticketId) as SessionId)
++    return !agent ? 'cold' : agent.status === 'idle' ? 'idle' : 'running'
++  }
++  /** A persisted cancellation receipt is not a user control and never clears the durable hold. */
++  interruptionStatus(ticketId: string, controlSeq: number): 'requested' | 'settled' | 'failed' {
++    const receipt = this.host.store.get(KV.executor.interruption(ticketId))
++    return receipt?.controlSeq === controlSeq ? receipt.state : 'requested'
++  }
++  /** A short bounded foreground wait; a longer cancellation remains visibly requested, not falsely stopped. */
++  async waitForInterruption(ticketId: string, assignmentId: string, controlSeq: number): Promise<void> {
++    const work = this.interrupting.get(`${assignmentId}:${controlSeq}`)
++    if (work) await until(work.catch(() => {}), undefined, 1000)
++  }
+   /** Stop what a ticket's worker runs in the background (see `stopBackground`). */
+   private stopWork(ticketId: string, reason: string, keepInbox = false): void {
+     this.track(ticketId, stopBackground(this.host.context, workerSessionId(ticketId), reason, keepInbox))
+@@ -410,30 +484,35 @@ export class DshExecutor implements Executor {
+   /** Marks a ticket failed after its launch fails; the ticket waits until new human input or an explicit retry arrives. */
+   private launchFailed(ticketId: string, assignmentId: string, error: unknown): void {
+     const ticket = this.host.store.tickets.get(ticketId)
+-    if (!ticket || !liveTicket(ticket) || latestAssignment(ticket)?.id !== assignmentId) return
+-    this.failed(ticketId, String(error))
++    if (!ticket || !liveTicket(ticket) || pausedExecution(ticket) || latestAssignment(ticket)?.id !== assignmentId) return
++    this.failed(ticketId, String(error), assignmentId, ticket.executionEvents?.at(-1)?.seq ?? 0)
+   }
+   /** Records a `failed` report on the ticket and relays the failure to the main Session in one transaction. */
+-  private failed(ticketId: string, summary: string): void {
++  private failed(ticketId: string, summary: string, expectedAssignmentId?: string, controlSeq?: number): void {
+     this.host.store.atomic(() => {
+-      const updated = this.host.engine.report(ticketId, { state: 'failed', summary })
++      const current = this.host.store.tickets.get(ticketId)
++      if (!current || !liveTicket(current) || pausedExecution(current)
++        || (expectedAssignmentId !== undefined && latestAssignment(current)?.id !== expectedAssignmentId)
++        || (controlSeq !== undefined && (current.executionEvents?.at(-1)?.seq ?? 0) !== controlSeq)) return
++      const updated = this.host.engine.report(ticketId, { state: 'failed', summary }, expectedAssignmentId)
+       this.relay(resultRelay(updated, 'failed', summary))
+     })
+   }
+   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
+-  private async launch(ticket: Ticket, assignment: Assignment): Promise<void> {
++  private async launch(ticket: Ticket, assignment: Assignment, signal: AbortSignal): Promise<void> {
+     const current = () => {
+       if (this.host.closing()) throw new Error('dsh-superagent is stopping')
+       if (this.host.paused()) throw new Later('Processing is paused')
+       const stored = this.host.store.tickets.get(ticket.id)
+-      return !!stored && liveTicket(stored) && latestAssignment(stored)?.id === assignment.id
++      return !signal.aborted && !!stored && liveTicket(stored) && !pausedExecution(stored) && latestAssignment(stored)?.id === assignment.id
++        && (stored.executionEvents?.at(-1)?.seq ?? 0) === (ticket.executionEvents?.at(-1)?.seq ?? 0)
+     }
+     const source = sourceTrigger(this.host, ticket)
+     const workspace = ticket.execution?.directory ?? ''
+     if (!current()) return
+     // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before `prepare` commands existed.
+     if (!await stat(workspace).then(() => true, () => false)) {
+-      await this.prepareDirectory(ticket)
++      await this.prepareDirectory(ticket, signal)
+       if (!current()) return
+     }
+     if (!current()) return
+@@ -483,7 +562,7 @@ export class DshExecutor implements Executor {
+       if (status !== 'idle' || cancelled.delete(agent) || this.host.closing()) return
+       const ticket = this.ticketOf(agent)
+       const assignment = ticket && runningAssignment(ticket)
+-      if (ticket && assignment && liveTicket(ticket)) void this.background(this.workerIdle(ticket, assignment, agent))
++      if (ticket && assignment && liveTicket(ticket) && !pausedExecution(ticket)) void this.background(this.workerIdle(ticket, assignment, agent))
+     }))
+     // A person's message typed into a worker's Session, which the ticket does not record.
+     this.disposers.push(ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+@@ -505,9 +584,9 @@ export class DshExecutor implements Executor {
+     this.disposers.push(ctx.on('agent/error', ({ agent, error }) => {
+       const ticket = this.ticketOf(agent)
+       const assignment = ticket && runningAssignment(ticket)
+-      if (!ticket || !assignment || !liveTicket(ticket) || this.host.closing()) return
++      if (!ticket || !assignment || !liveTicket(ticket) || pausedExecution(ticket) || this.host.closing()) return
+       if (this.retries(assignment.id, error)) { this.resumeAfter(ticket.id, assignment.id, error); return }
+-      void this.background(Promise.resolve().then(() => { this.failed(ticket.id, String(error)) }))
++      void this.background(Promise.resolve().then(() => { this.failed(ticket.id, String(error), assignment.id, ticket.executionEvents?.at(-1)?.seq ?? 0) }))
+     }))
+   }
+   /** Unsubscribes from host agent events and clears any pending transient-retry timers. */
+@@ -525,6 +604,10 @@ export class DshExecutor implements Executor {
+     // Launch pending tickets oldest first (in acceptance order).
+     for (const ticket of this.host.store.tickets.open().sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+       const running = runningAssignment(ticket), latest = latestAssignment(ticket)
++      if (pausedExecution(ticket)) {
++        if (latest) this.interrupt(ticket, latest)
++        continue
++      }
+       if (running) {
+         // A restart within this process left DSH's Sessions, jobs and subagents running: they stop first. The inbox keeps an
+         // Input that was handed over but not yet taken.
+@@ -553,13 +636,14 @@ export class DshExecutor implements Executor {
+   }
+   /** Schedules a worker turn retry with exponential backoff after a transient provider or network error. */
+   private resumeAfter(ticketId: string, assignmentId: string, error: unknown): void {
++    const controlSeq = this.host.store.tickets.get(ticketId)?.executionEvents?.at(-1)?.seq ?? 0
+     const tries = this.transient.get(assignmentId)!
+     const text = `Your last turn failed for a passing reason (${String(error).slice(0, 200)}). Continue the assignment where it stopped.`
+     this.resuming.add(assignmentId)
+     const go = () => {
+       if (this.host.closing()) return
+       const ticket = this.host.store.tickets.get(ticketId)
+-      if (!ticket || !liveTicket(ticket) || runningAssignment(ticket)?.id !== assignmentId) { this.resuming.delete(assignmentId); return }
++      if (!ticket || !liveTicket(ticket) || pausedExecution(ticket) || runningAssignment(ticket)?.id !== assignmentId || (ticket.executionEvents?.at(-1)?.seq ?? 0) !== controlSeq) { this.resuming.delete(assignmentId); return }
+       // Wait while processing is paused or no wake slot is free.
+       if (this.host.paused()) { this.after(SLOT_WAIT_MS, go); return }
+       const sessionId = workerSessionId(ticketId)
+@@ -568,9 +652,12 @@ export class DshExecutor implements Executor {
+         if (!(failure instanceof Later)) throw failure
+         this.after(SLOT_WAIT_MS, go); return
+       }
+-      const sent = this.host.sessions.prompt(sessionId, `retry:${assignmentId}:${tries}`, text, 'queue')
++      const sent = this.host.sessions.prompt(sessionId, `retry:${assignmentId}:${tries}`, text, 'queue', () => {
++         const current = this.host.store.tickets.get(ticketId)
++         if (!current || !liveTicket(current) || pausedExecution(current) || runningAssignment(current)?.id !== assignmentId || (current.executionEvents?.at(-1)?.seq ?? 0) !== controlSeq) throw new Later('Execution authorization changed')
++       })
+       void this.background(sent.finally(() => { if (waking) this.slots.free(ticketId); this.resuming.delete(assignmentId) })
+-        .catch(failure => { this.failed(ticketId, String(failure)) }))
++        .catch(failure => { this.failed(ticketId, String(failure), assignmentId, controlSeq) }))
+     }
+     this.after(TRANSIENT_BACKOFF_MS * 2 ** (tries - 1), go)
+   }
+@@ -607,7 +694,8 @@ export class DshExecutor implements Executor {
+     // The ticket while the Assignment that went idle runs it.
+     const live = () => {
+       const stored = this.host.store.tickets.get(ticket.id)
+-      return stored && liveTicket(stored) && runningAssignment(stored)?.id === idle.id ? stored : undefined
++      return stored && liveTicket(stored) && !pausedExecution(stored) && runningAssignment(stored)?.id === idle.id
++        && (stored.executionEvents?.at(-1)?.seq ?? 0) === (ticket.executionEvents?.at(-1)?.seq ?? 0) ? stored : undefined
+     }
+     // A worker whose last word was its result, a question for a person, or a blocked or failed report handed off to a person;
+     // an Input delivered after its result or question is new work.
+@@ -662,7 +750,7 @@ export class DshExecutor implements Executor {
+     const said = [text, stopped].filter(Boolean).join('\n\n')
+     this.host.store.atomic(() => {
+       const before = latestReport(current)?.summary ?? ''
+-      const updated = this.host.engine.report(ticket.id, { state: 'waiting', summary: said || before })
++      const updated = this.host.engine.report(ticket.id, { state: 'waiting', summary: said || before }, idle.id)
+       // A quiet final after orchestrator_report is not a new status or an empty handoff.
+       if (said) this.relay(resultRelay(updated, 'waiting', said))
+       else if (!before.trim()) {
+diff --git a/src/index.ts b/src/index.ts
+index 1889daf..26a1153 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -25,3 +25,7 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
+ }
+ export type { Deployment, DeploymentConfig } from './deployment.ts'
+ export * from './core/index.ts'
++
++export type { SourceContext, SourceHost } from './sources/host.ts'
++export type { SourceExecution, ExecutionScope, ExecutionControl, ExecutionCursor, ExecutionSummary, ExecutionRecord, ExecutionPage } from './sources/execution.ts'
++export { SourceExecutionError } from './sources/execution.ts'
+diff --git a/src/kv.ts b/src/kv.ts
+index e7ed695..7d7499d 100644
+--- a/src/kv.ts
++++ b/src/kv.ts
+@@ -29,6 +29,8 @@ export const KV = {
+   prompts: { revision: record<number>('prompt-revision'), version: family<PromptVersion, [revision: number]>('prompt-version:'),
+     /** The built-in text of a prompt part an override was edited from, by its `base`, which shows what an upgrade changed. */
+     builtIn: family<string, [base: string]>('prompt-built-in:') },
++  /** Executor: most recent verified interruption receipt; independent of the authoritative user-control journal. */
++  executor: { interruption: family<{ assignmentId: string; controlSeq: number; state: 'requested' | 'settled' | 'failed'; at: string }, [ticketId: string]>('execution-interruption:') },
+   /** Runtime: the main Session's ID. */
+   runtime: { masterId: record<string>('master-id') },
+   /** Sessions: prompt revisions each Session has worked under, ordered oldest first; the last entry (`.at(-1)`) is its active revision. */
+diff --git a/src/sources/host.ts b/src/sources/host.ts
+index 20f2088..bdd8960 100644
+--- a/src/sources/host.ts
++++ b/src/sources/host.ts
+@@ -5,6 +5,7 @@ import type { Deployment } from '../deployment.ts'
+ import type { SourceRegistry } from './registry.ts'
+ import type { SetupProblem } from '../setup.ts'
+ import type { Family, Key } from '../kv.ts'
++import type { SourceExecution } from './execution.ts'
+ import { fill } from '../infra/text.ts'
+ 
+ /** Fixed English health templates (`{name}` placeholders); the panel localizes each `code` in the interface language. */
+@@ -31,6 +32,8 @@ export interface ThreadDescription { label?: string; url?: string; facts?: Recor
+ export interface SourceContext {
+   readonly deployment: Deployment
+   readonly commands: Commands
++  /** Detect version before enabling native-chat controls. */
++  readonly execution: SourceExecution
+   readonly ready: Promise<void>
+   /** True once setup resolved the repository and accounts; Sources poll only then. */
+   configured(): boolean
+diff --git a/tests/locales.spec.ts b/tests/locales.spec.ts
+index 8938581..61d8bf5 100644
+--- a/tests/locales.spec.ts
++++ b/tests/locales.spec.ts
+@@ -28,7 +28,7 @@ it('names every health entry of dsh-superagent itself, which the overview shows
+   // Each entry by its writer: dsh-superagent, the model budget retries, every kind of the effect queue, Channel messages, the
+   // Executor and the unavailable Evals of the last hour.
+   const entries = { runtime: 0, models: 0, reply: 0, worker: 0, assessment: 0, launch: 0, delivery: 0, relay: 0,
+-    notice: 0, evals: 0 } satisfies Record<EffectKind | 'runtime' | 'models' | 'reply' | 'worker' | 'evals', 0>
++    notice: 0, interrupt: 0, evals: 0 } satisfies Record<EffectKind | 'runtime' | 'models' | 'reply' | 'worker' | 'evals', 0>
+   expect(Object.keys(entries).filter(name => !(`health.${name}` in zh))).toEqual([])
+ })
+ 
+diff --git a/tests/sources.spec.ts b/tests/sources.spec.ts
+index f4d0332..78e4b47 100644
+--- a/tests/sources.spec.ts
++++ b/tests/sources.spec.ts
+@@ -39,7 +39,7 @@ function host(overrides: Partial<SourceContextDeps> = {}) {
+   const commands = new Commands(() => deployment, {}, new AbortController().signal)
+   const receive = vi.fn(async (trigger: Trigger) => { const result = engine.receive(trigger); engine.evaluateDue(); return result })
+   // Record outbound messages in the store without sending them.
+-  const parts: SourceContextDeps = { store, engine, outbox: { send: message => { store.receipts.add(message) } }, commands, sources, deployment,
++  const parts: SourceContextDeps = { store, engine, execution: { store, engine, controller: {} }, outbox: { send: message => { store.receipts.add(message) } }, commands, sources, deployment,
+     ready: Promise.resolve(), configured: () => true, receive, ...overrides }
+   // The Sources' functions take the context; plugin entries and kind callbacks take the host, which builds each kind's context.
+   const value = { ...parts, context: (kind: { kind: string; health: readonly string[] }) => sourceContextOf(parts, kind) }
+@@ -1076,7 +1076,7 @@ describe('feishu event consumer', () => {
+     const deployment = testDeployment({ feishu: { ...testDeployment().feishu!, cli: path } })
+     const health = board.all
+     const commands = new Commands(() => deployment, {}, controller.signal)
+-    const deps: SourceContextDeps = { store, engine, outbox: { send: () => {} }, commands, sources, deployment, ready: Promise.resolve(), configured: () => true,
++    const deps: SourceContextDeps = { store, engine, execution: { store, engine, controller: {} }, outbox: { send: () => {} }, commands, sources, deployment, ready: Promise.resolve(), configured: () => true,
+       receive: (trigger: Trigger) => engine.receive(trigger) }
+     const turnOff = () => store.saveSettings(SettingsSchema.parse({ sources: { feishu: { enabled: false, config: { chats: [] } } } }))
+     return { ctx: sourceContextOf(deps, feishuKind), health, store, turnOff }
+diff --git a/src/app/source-execution.ts b/src/app/source-execution.ts
+new file mode 100644
+index 0000000..4750175
+--- /dev/null
++++ b/src/app/source-execution.ts
+@@ -0,0 +1,167 @@
++/** Source execution adapter: authorization, transactional controls, and bounded passive worker history. */
++import type { SessionHistoryRecord } from '@deepseek-ai/dsh-api-session-controller'
++import type { SessionId } from '@deepseek-ai/dsh-session'
++import { latestAssignment, pausedExecution, UserError, type Engine, type Ticket } from '../core/index.ts'
++import { workerSessionId } from '../executor/dsh.ts'
++import { SourceExecutionError } from '../sources/execution.ts'
++import type { SourceExecution, ExecutionScope, ExecutionSummary, ExecutionRecord } from '../sources/execution.ts'
++import type { Store } from './store.ts'
++
++export interface SourceExecutionDeps {
++  store: Pick<Store, 'threads' | 'tickets' | 'triggers' | 'atomic'>
++  engine: Pick<Engine, 'interruptTicket' | 'resumeTicket'>
++  /** Structural cold-read seam: alpha inspect+page and RC events/page with optional cut. */
++  controller: object
++  activity?(ticketId: string): ExecutionSummary['activity']
++  interruptionStatus?(ticketId: string, controlSeq: number): 'requested' | 'settled' | 'failed'
++  waitForInterruption?(ticketId: string, assignmentId: string, controlSeq: number): Promise<void>
++}
++interface ColdController {
++  inspect?(id: SessionId, signal?: AbortSignal): Promise<{ events: readonly { seq: number }[] }>
++  page?(request: { address: { kind: 'session'; sessionId: SessionId }; throughSeq?: number; beforeSeq?: number; maxMessages: number }, signal: AbortSignal): Promise<{ records: readonly SessionHistoryRecord[]; hasMore: boolean; cursor?: number }>
++  events?: ColdController['page']
++}
++const MAX_RECORDS = 100, MAX_BYTES = 128 * 1024, MAX_TEXT = 8000
++const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value)
++  ? value as Record<string, unknown> : {}
++/** Text is display-only; redact recognized credential formats even when a worker printed one. */
++function display(value: string): string {
++  return value.slice(0, MAX_TEXT * 2).replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [redacted]')
++    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|gh[pousr]_[a-zA-Z0-9_]+|github_pat_[a-zA-Z0-9_]+)\b/g, '[redacted]')
++    .replace(/((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|credential)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1[redacted]')
++    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, '[private key redacted]')
++    .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/gi, 'https://[redacted]@').slice(0, MAX_TEXT)
++}
++/** Explicit projection, not recursive passthrough: reasoning, prompts, tool args/results, raw config and errors stay private. */
++function visible(raw: unknown): ExecutionRecord | undefined {
++  const event = object(raw), data = object(event.data)
++  if (!Number.isSafeInteger(event.seq) || Number(event.seq) < 0 || typeof event.time !== 'number' || !Number.isFinite(event.time)) return
++  const type = event.type
++  let safe: Record<string, unknown> | undefined
++  if (type === 'user/message' || type === 'assistant/message') {
++    const message = object(data.message ?? data)
++    const text = Array.isArray(message.content) ? message.content.slice(0, 128).flatMap(block => {
++      const item = object(block)
++      return item.type === 'text' && typeof item.text === 'string' ? [display(item.text)] : []
++    }).join('\n').slice(0, MAX_TEXT) : ''
++    if (text) safe = { text }
++  } else if (typeof type === 'string' && /^(turn|step)\/(start|end)$/.test(type)) {
++    safe = {}
++    for (const name of ['turn', 'step']) if (Number.isSafeInteger(data[name])) safe[name] = data[name]
++  } else if (type === 'tool/call' || type === 'tool/result') {
++    safe = typeof data.name === 'string' ? { name: display(data.name).slice(0, 120) } : {}
++  } else if (type === 'llm/request' || type === 'llm/response') {
++    // Preserve a route only when the persisted event states it; never infer it from a preset/default/title.
++    if (typeof data.provider === 'string' && typeof data.model === 'string') safe = { provider: display(data.provider), model: display(data.model) }
++  }
++  return safe ? { seq: Number(event.seq), time: event.time, event: { type: String(type), data: safe } } : undefined
++}
++/** Map domain failures to fixed public failures; never expose arbitrary dependency messages or causes. */
++async function safe<T>(work: () => T | Promise<T>): Promise<T> {
++  try { return await work() } catch (error) {
++    if (error instanceof SourceExecutionError) throw error
++    if (error instanceof UserError) {
++      if (error.code === 'executionScope') throw new SourceExecutionError(403, error.code, 'Execution does not belong to this Source conversation')
++      if (['unknownTicket', 'unknownAssignment'].includes(error.code)) throw new SourceExecutionError(404, error.code, 'Execution not found')
++      if (['ticketEnded', 'staleAssignment', 'staleControl', 'executionPaused', 'executionNotPaused', 'mandateRevoked'].includes(error.code)) {
++        throw new SourceExecutionError(409, error.code, 'Execution state changed; read the current execution before controlling it')
++      }
++    }
++    throw new SourceExecutionError(503, 'executionUnavailable')
++  }
++}
++export function sourceExecutionOf(deps: SourceExecutionDeps, kind: string): SourceExecution {
++  const authorize = (input: ExecutionScope): Ticket => {
++    if (!input || typeof input.threadKey !== 'string' || typeof input.ticketId !== 'string') throw new UserError('executionScope')
++    const thread = deps.store.threads.get(input.threadKey), ticket = deps.store.tickets.get(input.ticketId)
++    const origin = ticket && deps.store.triggers.get(ticket.origin.triggerId)
++    // A context-only subscription cannot grant control/read of another Source's worker.
++    if (!thread || thread.key !== input.threadKey || thread.ref.source !== kind || !ticket || origin?.source !== kind
++      || !origin.threads.some(ref => ref.source === kind && `${ref.source}:${ref.id}` === input.threadKey)
++      || !thread.subscriptions.includes(ticket.id) || thread.context?.includes(ticket.id)) throw new UserError('executionScope')
++    return ticket
++  }
++  const summary = (input: ExecutionScope, ticket: Ticket): ExecutionSummary => {
++    const assignment = latestAssignment(ticket), pause = pausedExecution(ticket)
++    return { version: 1, threadKey: input.threadKey, ticketId: ticket.id, ...(assignment ? { assignmentId: assignment.id } : {}),
++      state: ticket.ended ? 'ended' : pause ? 'paused' : assignment?.state === 'running' ? 'running' : 'pending',
++      activity: deps.activity?.(ticket.id) ?? 'unknown',
++      ...(pause ? { pausedAt: pause.at, interruption: deps.interruptionStatus?.(ticket.id, pause.seq) ?? 'requested' } : {}), controlSeq: ticket.executionEvents?.at(-1)?.seq ?? 0 }
++  }
++  const control = (input: Parameters<SourceExecution['interrupt']>[0], resume: boolean): ExecutionSummary => deps.store.atomic(() => {
++    if (!input || Object.keys(input).some(key => !['threadKey', 'ticketId', 'expectedAssignmentId', 'expectedControlSeq'].includes(key))
++      || typeof input.expectedAssignmentId !== 'string' || !input.expectedAssignmentId
++      || !Number.isSafeInteger(input.expectedControlSeq) || input.expectedControlSeq < 0) throw new UserError('executionScope')
++    authorize(input)
++    const ticket = resume ? deps.engine.resumeTicket(input.ticketId, input.expectedAssignmentId, input.expectedControlSeq)
++      : deps.engine.interruptTicket(input.ticketId, input.expectedAssignmentId, input.expectedControlSeq)
++    return summary(input, ticket)
++  })
++  return {
++    version: 1,
++    interrupt: input => safe(async () => {
++      const result = control(input, false)
++      await deps.waitForInterruption?.(input.ticketId, input.expectedAssignmentId, result.controlSeq)
++      return summary(input, authorize(input))
++    }),
++    resume: input => safe(async () => {
++      const ticket = authorize(input), pause = pausedExecution(ticket)
++      if (pause && deps.interruptionStatus?.(ticket.id, pause.seq) !== 'settled') throw new SourceExecutionError(409, 'interruptionPending', 'Worker interruption has not been acknowledged')
++      return control(input, true)
++    }),
++    read: input => safe(async () => {
++      const ticket = authorize(input)
++      if (Object.keys(input).some(key => !['threadKey', 'ticketId', 'cursor', 'limit'].includes(key))) throw new UserError('executionScope')
++      const limit = input.limit ?? 50, cursor = input.cursor
++      if (!Number.isSafeInteger(limit) || limit < 0 || limit > MAX_RECORDS || (cursor && (
++        !Number.isSafeInteger(cursor.throughSeq) || cursor.throughSeq < -1 ||
++        (cursor.beforeSeq !== undefined && (!Number.isSafeInteger(cursor.beforeSeq) || cursor.beforeSeq < 0 || cursor.beforeSeq > cursor.throughSeq + 1))
++        || Object.keys(cursor).some(key => !['throughSeq', 'beforeSeq'].includes(key))))) throw new SourceExecutionError(400, 'invalidExecutionWindow', 'Invalid execution history window')
++      const base = () => summary(input, authorize(input))
++      const empty = { records: [] as ExecutionRecord[], hasMore: false, truncated: false }
++      if (limit === 0) return { ...base(), ...empty, history: 'not-read' }
++      // Runtime capability detection, not a dependency-version guess and never private Engine access.
++      const controller = deps.controller as ColdController
++      const readPage = typeof controller.events === 'function' ? controller.events : controller.page
++      if (typeof readPage !== 'function') return { ...base(), ...empty, history: 'unsupported' }
++      const signal = AbortSignal.timeout(5000), sessionId = workerSessionId(ticket.id) as SessionId
++      let throughSeq = cursor?.throughSeq
++      // Alpha requires an initial cut from its explicitly cold inspect. RC removed inspect and returns cursor from events.
++      if (throughSeq === undefined && typeof controller.inspect === 'function') {
++        const inspection = await controller.inspect(sessionId, signal).catch((error: unknown) => {
++          if (object(error).code === 'session/not-found') return undefined
++          throw error
++        })
++        if (!inspection) return { ...base(), ...empty, history: 'missing' }
++        throughSeq = inspection.events.reduce((max, event) => Math.max(max, event.seq), -1)
++        if (throughSeq < 0) return { ...base(), ...empty, history: 'available' }
++      }
++      const page = await readPage.call(controller, { address: { kind: 'session', sessionId },
++        ...(throughSeq !== undefined ? { throughSeq } : {}),
++        ...(cursor?.beforeSeq !== undefined ? { beforeSeq: cursor.beforeSeq } : {}), maxMessages: Math.min(limit, 50) }, signal).catch((error: unknown) => {
++        if (object(error).code === 'session/not-found') return undefined
++        throw error
++      })
++      if (!page) return { ...base(), ...empty, history: 'missing' }
++      throughSeq ??= page.cursor
++      if (!Number.isSafeInteger(throughSeq) || throughSeq! < -1) return { ...base(), ...empty, history: 'unsupported' }
++      // One underlying page only per call; never scan recursively when every record is filtered.
++      const records: ExecutionRecord[] = []
++      let bytes = 2, truncated = false, before = cursor?.beforeSeq, scanned = 0
++      const raw = page.records.map(record => record.event).filter(event => Number.isSafeInteger(event.seq)).sort((a, b) => b.seq - a.seq)
++      for (const event of raw) {
++        if (records.length >= limit || scanned++ >= 1000) { truncated = true; break }
++        const item = visible(event)
++        const size = item ? Buffer.byteLength(JSON.stringify(item), 'utf8') + 1 : 0
++        if (bytes + size > MAX_BYTES) { truncated = true; break }
++        before = event.seq
++        if (item) { records.push(item); bytes += size }
++        // All trace entries are projections; flag omissions, including reasoning-only records.
++        truncated = true // This interface intentionally returns projections, never raw event payloads.
++      }
++      const hasMore = page.hasMore || (before !== undefined && raw.some(event => event.seq < before))
++      return { ...base(), records: records.reverse(), history: 'available', hasMore, truncated,
++        ...(hasMore && before !== undefined ? { nextCursor: { throughSeq: throughSeq!, beforeSeq: before } } : {}) }
++    }),
++  }
++}
+diff --git a/src/sources/execution.ts b/src/sources/execution.ts
+new file mode 100644
+index 0000000..3f83f8e
+--- /dev/null
++++ b/src/sources/execution.ts
+@@ -0,0 +1,44 @@
++/** Browser-safe, Source-scoped execution interface. No caller chooses a Session or the orchestrator. */
++/** Stable transport-safe failure. No internal stack, cause, filesystem path or raw provider detail crosses the Source seam. */
++export class SourceExecutionError extends Error {
++  override readonly name = 'SourceExecutionError'
++  constructor(readonly status: 400 | 403 | 404 | 409 | 503, readonly code: string, message = 'Execution operation unavailable') {
++    super(message)
++    this.stack = undefined
++  }
++  toJSON(): { name: string; status: number; code: string; message: string } {
++    return { name: this.name, status: this.status, code: this.code, message: this.message }
++  }
++}
++export interface ExecutionScope { threadKey: string; ticketId: string }
++export interface ExecutionControl extends ExecutionScope { expectedAssignmentId: string; expectedControlSeq: number }
++export interface ExecutionCursor { throughSeq: number; beforeSeq?: number }
++export interface ExecutionSummary extends ExecutionScope {
++  version: 1
++  assignmentId?: string
++  state: 'pending' | 'running' | 'paused' | 'ended'
++  /** Observed SDK turn/preparation activity; never inferred from Assignment.state. */
++  activity: 'running' | 'idle' | 'cold' | 'preparing' | 'unknown'
++  pausedAt?: string
++  /** Paused is a durable hold; only settled proves the SDK turn and background work stopped. */
++  interruption?: 'requested' | 'settled' | 'failed'
++  /** Cursor in the ticket control journal; not comparable to worker event seq. */
++  controlSeq: number
++}
++export interface ExecutionRecord { seq: number; time: number; event: { type: string; data: Record<string, unknown> } }
++export interface ExecutionPage extends ExecutionSummary {
++  records: ExecutionRecord[]
++  history: 'available' | 'missing' | 'unsupported' | 'not-read'
++  hasMore: boolean
++  /** Some records/fields were filtered or capped; an empty page need not mean empty history. */
++  truncated: boolean
++  nextCursor?: ExecutionCursor
++}
++/** All methods verify Source kind + thread ownership + ticket subscription, including read and continuation. */
++export interface SourceExecution {
++  readonly version: 1
++  read(input: ExecutionScope & { cursor?: ExecutionCursor; limit?: number }): Promise<ExecutionPage>
++  interrupt(input: ExecutionControl): Promise<ExecutionSummary>
++  /** Human text is intentionally not accepted: send it through Source.receive for normal Trigger audit/admission. */
++  resume(input: ExecutionControl): Promise<ExecutionSummary>
++}
+diff --git a/tests/execution.spec.ts b/tests/execution.spec.ts
+new file mode 100644
+index 0000000..f5d8ada
+--- /dev/null
++++ b/tests/execution.spec.ts
+@@ -0,0 +1,283 @@
++/** Nonterminal execution controls: real worker cancellation, durable holds, scoped cold history, no model calls. */
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
++import { latestAssignment, pausedExecution } from '../src/core/index.ts'
++import { sourceExecutionOf } from '../src/app/source-execution.ts'
++import { Commands } from '../src/infra/commands.ts'
++import { Store } from '../src/app/store.ts'
++import { deferred, waitUntil } from './fixtures/async.ts'
++import { CHAT, feishu, startRuntime, type Host } from './fixtures/host.ts'
++
++let h: Host
++beforeEach(async () => { h = await startRuntime() })
++afterEach(async () => { await h.stop() })
++const source = () => h.runtime.context({ kind: 'feishu', health: [] }).execution
++const scopeOf = (ticketId: string, root = 'om_1') => ({ threadKey: `feishu:${CHAT}:${root}`, ticketId })
++const controlOf = (ticket: { id: string; assignments: { id: string }[] }) => ({ ...scopeOf(ticket.id), expectedAssignmentId: ticket.assignments.at(-1)!.id, expectedControlSeq: 0 })
++const workerDeliveries = (id: string) => h.deliveries.mock.calls.filter(([call]) => call.sessionId === id)
++
++describe('nonterminal execution interruption', () => {
++  it('cancels the running worker but preserves ticket, mandate, subscription, assignment and inbox; resume reuses worker and directory', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix'))
++    const control = controlOf(one.ticket), agent = h.agents.get(one.sessionId)!, beforeCreate = h.controller.create.mock.calls.length
++    const result = await source().interrupt(control)
++    await h.runtime.idle()
++    expect(result).toMatchObject({ version: 1, state: 'paused', assignmentId: control.expectedAssignmentId, controlSeq: 1, activity: 'idle', interruption: 'settled' })
++    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: true })
++    const paused = h.runtime.store.tickets.get(one.ticket.id)!
++    expect(paused).not.toHaveProperty('ended')
++    expect(paused.mandate).toEqual(one.ticket.mandate)
++    expect(paused.assignments).toEqual(one.ticket.assignments)
++    expect(h.runtime.store.threads.get(control.threadKey)!.subscriptions).toContain(one.ticket.id)
++    const deliveries = workerDeliveries(one.sessionId).length
++    h.runtime.receive(feishu('2', 'follow-up', { root_id: 'om_1', mentions: [] }))
++    await h.runtime.idle()
++    expect(workerDeliveries(one.sessionId)).toHaveLength(deliveries)
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.undelivered).toHaveLength(1)
++    expect(await source().resume({ ...control, expectedControlSeq: 1 })).toMatchObject({ state: 'running', controlSeq: 2, assignmentId: control.expectedAssignmentId })
++    await h.runtime.idle()
++    const continued = h.runtime.store.tickets.get(one.ticket.id)!
++    expect(pausedExecution(continued)).toBeUndefined()
++    expect(continued.assignments).toHaveLength(1)
++    expect(continued.execution).toEqual(one.ticket.execution)
++    expect(h.agents.get(one.sessionId)).toBe(agent)
++    expect(h.controller.create).toHaveBeenCalledTimes(beforeCreate)
++    expect(continued.undelivered).toEqual([])
++    expect(continued.executionEvents?.map(event => [event.seq, event.type])).toEqual([[1, 'interrupted'], [2, 'continued']])
++  })
++  it('rejects stale assignment controls and ended tickets; duplicate interrupt appends/cancels only once', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    await expect(source().interrupt({ ...control, expectedAssignmentId: 'stale' })).rejects.toMatchObject({ code: 'staleAssignment' })
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.executionEvents).toBeUndefined()
++    await source().interrupt(control); await h.runtime.idle()
++    const cancels = h.agents.get(one.sessionId)!.cancel.mock.calls.length
++    await source().interrupt(control); await h.runtime.idle()
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.executionEvents).toHaveLength(1)
++    expect(h.agents.get(one.sessionId)!.cancel).toHaveBeenCalledTimes(cancels)
++    await expect(source().resume({ ...control, expectedAssignmentId: 'stale', expectedControlSeq: 1 })).rejects.toMatchObject({ code: 'staleAssignment' })
++    h.runtime.engine.stopTicket(one.ticket.id)
++    await expect(source().resume({ ...control, expectedControlSeq: 1 })).rejects.toMatchObject({ code: 'ticketEnded' })
++    await expect(source().interrupt(control)).rejects.toMatchObject({ code: 'ticketEnded' })
++  })
++  it('keeps management retry compatible but refuses retry while interrupted and rejects the previous assignment afterwards', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    h.runtime.engine.report(one.ticket.id, { state: 'failed', summary: 'failed' })
++    await source().interrupt(control)
++    expect(() => h.runtime.engine.retryTicket(one.ticket.id)).toThrow('explicitly resume')
++    await source().resume({ ...control, expectedControlSeq: 1 }); await h.runtime.idle()
++    h.runtime.engine.report(one.ticket.id, { state: 'failed', summary: 'failed again' })
++    h.runtime.engine.retryTicket(one.ticket.id); await h.runtime.idle()
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.assignments).toHaveLength(2)
++    await expect(source().interrupt(control)).rejects.toMatchObject({ code: 'staleAssignment' })
++    expect(() => h.runtime.engine.report(one.ticket.id, { state: 'ready', summary: 'late old worker' }, control.expectedAssignmentId)).toThrow('expected Assignment')
++  })
++  it('persists the control journal and prevents recovery/delivery/late reports after a fresh host restart', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    await source().interrupt(control); await h.runtime.idle()
++    const ticket = h.runtime.store.tickets.get(one.ticket.id)!, thread = h.runtime.store.threads.get(control.threadKey)!
++    const reader = new Store(`${h.directory}/orchestrator.sqlite`)
++    expect(pausedExecution(reader.tickets.get(ticket.id)!)).toEqual(pausedExecution(ticket)); reader.close()
++    await h.stop()
++    h = await startRuntime(store => { store.triggers.save(one.trigger); store.threads.save(thread); store.tickets.save(ticket) })
++    await h.runtime.idle()
++    expect(h.agents.has(one.sessionId)).toBe(false)
++    expect(workerDeliveries(one.sessionId)).toEqual([])
++    h.runtime.engine.assignmentInterrupted(ticket.id, control.expectedAssignmentId)
++    h.runtime.engine.assignmentStarted(ticket.id, control.expectedAssignmentId)
++    expect(() => h.runtime.engine.report(ticket.id, { state: 'ready', summary: 'late result' })).toThrow('interrupted')
++    expect(() => h.runtime.engine.report(ticket.id, { state: 'failed', summary: 'late error' })).toThrow('interrupted')
++    const after = h.runtime.store.tickets.get(ticket.id)!
++    expect(after.executionEvents).toEqual(ticket.executionEvents)
++    expect(after.assignments).toEqual(ticket.assignments)
++    expect(after).not.toHaveProperty('ended')
++  })
++  it('cuts off an in-flight delivery and pending launch without reporting failures or launching a new assignment', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix'))
++    const gate = deferred(); let held = false
++    h.controller.resolveAgent.mockImplementation(async (id: string) => {
++      if (id === one.sessionId && !held) { held = true; await gate.promise }
++      return h.resolveDefault(id)
++    })
++    const before = workerDeliveries(one.sessionId).length
++    h.runtime.receive(feishu('2', 'follow-up', { root_id: 'om_1', mentions: [] }))
++    await waitUntil(() => held)
++    await source().interrupt(controlOf(one.ticket)); gate.resolve(); await h.runtime.idle()
++    expect(workerDeliveries(one.sessionId)).toHaveLength(before)
++    expect(h.runtime.store.tickets.get(one.ticket.id)).not.toHaveProperty('delivery')
++  })
++  it('compares the control generation and accepts only exact last-operation replay after a lost response', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    await source().interrupt(control)
++    await source().interrupt(control)
++    await source().resume({ ...control, expectedControlSeq: 1 }); await h.runtime.idle()
++    const count = workerDeliveries(one.sessionId).length
++    expect(await source().resume({ ...control, expectedControlSeq: 1 })).toMatchObject({ state: 'running', controlSeq: 2 })
++    await expect(source().interrupt(control)).rejects.toMatchObject({ code: 'staleControl' })
++    await expect(source().resume(control)).rejects.toMatchObject({ code: 'staleControl' })
++    expect(workerDeliveries(one.sessionId)).toHaveLength(count)
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.executionEvents).toHaveLength(2)
++    await source().interrupt({ ...control, expectedControlSeq: 2 })
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.executionEvents).toHaveLength(3)
++  })
++  it('does not cancel before commit, and rolls back the journal and cancellation effect together', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    const agent = h.agents.get(one.sessionId)!, before = agent.cancel.mock.calls.length
++    expect(() => h.runtime.store.atomic(() => {
++      h.runtime.engine.interruptTicket(one.ticket.id, control.expectedAssignmentId, 0)
++      expect(agent.cancel).toHaveBeenCalledTimes(before)
++      throw new Error('rollback')
++    })).toThrow('rollback')
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.executionEvents).toBeUndefined()
++    expect(h.runtime.effects.pending('interrupt')).toBe(false)
++    expect(agent.cancel).toHaveBeenCalledTimes(before)
++    const cancel = agent.cancel.getMockImplementation()!
++    agent.cancel.mockImplementationOnce((...args) => { expect(pausedExecution(h.runtime.store.tickets.get(one.ticket.id)!)).toBeDefined(); return cancel(...args) })
++    await source().interrupt(control); await h.runtime.idle()
++  })
++  it('cancels in-flight preparation and holds a pending Assignment until explicit continuation', async () => {
++    const settings = h.runtime.store.settings()
++    h.runtime.store.saveSettings({ ...settings, executor: { ...settings.executor, prepare: 'make worktree' } })
++    const gate = deferred(); h.hooks.prepare = gate.promise
++    const trigger = feishu('1', '@bot fix'); h.runtime.receive(trigger); await h.runtime.idle()
++    await h.route({ kind: 'accept', trigger_id: trigger.id, title: 'fix', worktree_name: 'fix-prepare', acknowledgement: 'ok' })
++    await waitUntil(() => h.subprocess.spawn.mock.calls.some(([call]) => call.argv[0] === 'sh'))
++    const ticket = h.runtime.store.tickets.list()[0]!, control = controlOf(ticket)
++    expect(latestAssignment(ticket)?.state).toBe('pending')
++    const prepareCall = h.subprocess.spawn.mock.calls.find(([call]) => call.argv[0] === 'sh')![0] as { signal?: AbortSignal }
++    await source().interrupt(control)
++    expect(prepareCall.signal?.aborted).toBe(true)
++    gate.resolve(); await h.runtime.idle()
++    expect(h.agents.has(`worker-${ticket.id}`)).toBe(false)
++    expect(h.runtime.store.tickets.get(ticket.id)!.assignments).toHaveLength(1)
++    await source().resume({ ...control, expectedControlSeq: 1 }); await h.runtime.idle()
++    const after = h.runtime.store.tickets.get(ticket.id)!
++    expect(latestAssignment(after)).toMatchObject({ id: control.expectedAssignmentId, state: 'running' })
++    expect(after.execution).toEqual(ticket.execution)
++  })
++  it('stops worker jobs/subagents and never resurrects a delayed transient retry after pause and resume', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    const job = h.jobs.run(one.sessionId, 'worker job'), child = h.subagents.spawn(one.sessionId)
++    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
++    try {
++      h.ctx.emit('agent/error', { agent: h.agents.get(one.sessionId), error: Object.assign(new Error('busy'), { status: 503 }) } as never)
++      await source().interrupt(control)
++      await vi.advanceTimersByTimeAsync(0); await h.runtime.idle()
++      expect(h.jobs.service.kill).toHaveBeenCalledWith(job, one.sessionId, expect.any(String))
++      expect(h.subagents.live(child)).toBe(false)
++      await source().resume({ ...control, expectedControlSeq: 1 }); await h.runtime.idle()
++      await vi.advanceTimersByTimeAsync(20_000)
++      expect(workerDeliveries(one.sessionId).some(([call]) => call.text.includes('passing reason'))).toBe(false)
++    } finally { vi.useRealTimers() }
++  })
++  it('rejects a report whose asynchronous PR lookup crossed interruption and continuation on the same Assignment', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    const gate = deferred(); let held = false
++    vi.mocked(Commands.prototype.gh).mockImplementation(async () => {
++      held = true; await gate.promise
++      return { state: 'open', html_url: 'https://example.invalid/pull/7', user: { login: 'agent-bot' }, head: { sha: 'abc', ref: one.ticket.execution!.name, repo: { full_name: 'acme/widgets' } } }
++    })
++    const report = h.runTool(one.sessionId, 'orchestrator_report', { state: 'ready', summary: 'late result', pr_number: 7 })
++    const refused = expect(report).rejects.toThrow('authorization changed')
++    await waitUntil(() => held)
++    await source().interrupt(control)
++    await source().resume({ ...control, expectedControlSeq: 1 }); await h.runtime.idle()
++    gate.resolve(); await refused
++    const after = h.runtime.store.tickets.get(one.ticket.id)!
++    expect(after).not.toHaveProperty('follows')
++    expect(after).not.toHaveProperty('ended')
++    expect(latestAssignment(after)?.report?.summary).not.toBe('late result')
++  })
++  it('reports requested until SDK idle acknowledgment and refuses premature continuation', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    const agent = h.agents.get(one.sessionId)! as unknown as { whenIdle(): Promise<void> }
++    const original = agent.whenIdle, gate = deferred()
++    agent.whenIdle = () => gate.promise
++    expect(await source().interrupt(control)).toMatchObject({ state: 'paused', interruption: 'requested' })
++    expect(await source().read({ ...scopeOf(one.ticket.id), limit: 0 })).toMatchObject({ state: 'paused', interruption: 'requested' })
++    await expect(source().resume({ ...control, expectedControlSeq: 1 })).rejects.toMatchObject({ name: 'SourceExecutionError', status: 409, code: 'interruptionPending' })
++    gate.resolve(); await h.runtime.idle(); agent.whenIdle = original
++    expect(await source().read({ ...scopeOf(one.ticket.id), limit: 0 })).toMatchObject({ interruption: 'settled' })
++    await source().resume({ ...control, expectedControlSeq: 1 })
++  })
++  it('persists failed cancellation acknowledgments without leaking internal failure details', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    const agent = h.agents.get(one.sessionId)! as unknown as { whenIdle(): Promise<void> }, original = agent.whenIdle
++    agent.whenIdle = async () => { throw new Error('INTERNAL_CREDENTIAL_AND_PATH') }
++    const result = await source().interrupt(control); await h.runtime.idle(); agent.whenIdle = original
++    expect(result).toMatchObject({ state: 'paused', interruption: 'failed' })
++    expect(JSON.stringify(result)).not.toContain('INTERNAL_CREDENTIAL')
++    await expect(source().resume({ ...control, expectedControlSeq: 1 })).rejects.toMatchObject({ status: 409, code: 'interruptionPending' })
++    expect(h.runtime.effects.pending('interrupt')).toBe(true)
++  })
++  it('does not permit Source control to inject unaudited text or another Source/thread/ticket/session', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), control = controlOf(one.ticket)
++    for (const input of [{ ...control, threadKey: 'github:1' }, { ...control, ticketId: 'other' }, { ...control, sessionId: h.runtime.masterId }]) {
++      await expect(source().interrupt(input)).rejects.toMatchObject({ code: 'executionScope' })
++      await expect(source().read(input)).rejects.toMatchObject({ code: 'executionScope' })
++    }
++    await expect(h.runtime.context({ kind: 'github', health: [] }).execution.interrupt(control)).rejects.toMatchObject({ code: 'executionScope' })
++    await source().interrupt(control)
++    await expect(source().resume({ ...control, text: 'unaudited' } as typeof control)).rejects.toMatchObject({ code: 'executionScope' })
++    expect(h.runtime.store.tickets.get(one.ticket.id)!.inputs.some(input => input.kind === 'text' && input.text === 'unaudited')).toBe(false)
++  })
++})
++
++describe('scoped passive trace', () => {
++  it('uses only cold inspect/page, preserves real seq/time, filters reasoning/credentials and advances even on empty filtered pages', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), scope = scopeOf(one.ticket.id)
++    const events = [
++      { seq: 10, time: 100, type: 'assistant/message', data: { message: { content: [{ type: 'thinking', thinking: 'PRIVATE' }, { type: 'text', text: 'ok Bearer abc-secret api_key=private-key' }] }, credential: 'SECRET' } },
++      { seq: 11, time: 101, type: 'reasoning/message', data: { text: 'PRIVATE' } },
++      { seq: 12, time: 102, type: 'llm/response', data: { provider: 'actual-provider', model: 'actual-model', token: 'SECRET' } },
++    ]
++    const inspect = vi.fn(async () => ({ header: { id: one.sessionId }, events }))
++    const page = vi.fn(async () => ({ records: events.map(event => ({ type: 'event', event })), hasMore: true }))
++    const execution = sourceExecutionOf({ store: h.runtime.store, engine: h.runtime.engine, controller: { inspect, page } as never }, 'feishu')
++    h.controller.resolveAgent.mockClear(); h.controller.create.mockClear()
++    expect(await execution.read({ ...scope, limit: 0 })).toMatchObject({ history: 'not-read', records: [] })
++    expect(inspect).not.toHaveBeenCalled(); expect(page).not.toHaveBeenCalled()
++    const result = await execution.read({ ...scope, limit: 10 })
++    expect(result).toMatchObject({ history: 'available', hasMore: true, truncated: true, nextCursor: { throughSeq: 12, beforeSeq: 10 } })
++    expect(result.records.map(record => [record.seq, record.time])).toEqual([[10, 100], [12, 102]])
++    expect(result.records.at(-1)?.event.data).toEqual({ provider: 'actual-provider', model: 'actual-model' })
++    expect(JSON.stringify(result)).not.toMatch(/PRIVATE|SECRET|abc-secret|private-key/)
++    expect(h.controller.resolveAgent).not.toHaveBeenCalled(); expect(h.controller.create).not.toHaveBeenCalled()
++    expect(page).toHaveBeenCalledTimes(1)
++    page.mockResolvedValueOnce({ records: [{ type: 'event', event: events[1]! }], hasMore: true })
++    const empty = await execution.read({ ...scope, cursor: { throughSeq: 12, beforeSeq: 12 } })
++    expect(empty).toMatchObject({ records: [], history: 'available', truncated: true, hasMore: true, nextCursor: { throughSeq: 12, beforeSeq: 11 } })
++    expect(inspect).toHaveBeenCalledTimes(1)
++  })
++  it('supports RC passive events without inspect and exposes only stable safe failures', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), scope = scopeOf(one.ticket.id)
++    const events = vi.fn(async (_request: unknown, _signal: AbortSignal) => ({ records: [{ type: 'event', event: { seq: 9, time: 42, type: 'user/message', data: { content: [{ type: 'text', text: 'hello' }] } } }], cursor: 9, hasMore: true }))
++    const execution = sourceExecutionOf({ store: h.runtime.store, engine: h.runtime.engine, controller: { events } }, 'feishu')
++    const page = await execution.read(scope)
++    expect(page).toMatchObject({ history: 'available', nextCursor: { throughSeq: 9, beforeSeq: 9 } })
++    expect(events.mock.calls[0]![0]).not.toHaveProperty('throughSeq')
++    events.mockRejectedValueOnce(Object.assign(new Error('private stack token=secret'), { code: 'session/not-found' }))
++    expect(await execution.read(scope)).toMatchObject({ history: 'missing' })
++    events.mockRejectedValueOnce(new Error('private stack token=secret'))
++    const failure = await execution.read(scope).catch(error => error)
++    expect(failure).toMatchObject({ name: 'SourceExecutionError', status: 503, code: 'executionUnavailable' })
++    expect(failure.stack).toBeUndefined()
++    expect(JSON.stringify(failure)).not.toMatch(/private|secret/)
++    const invalid = await execution.read({ ...scope, limit: 101 }).catch(error => error)
++    expect(invalid).toMatchObject({ status: 400, code: 'invalidExecutionWindow' })
++  })
++  it('enforces record/byte/page bounds, detects unavailable cold capability, and refuses cross-thread reads before IO', async () => {
++    const one = await h.acceptedTicket(feishu('1', '@bot fix')), scope = scopeOf(one.ticket.id)
++    const events = Array.from({ length: 100 }, (_, seq) => ({ seq, time: 100 + seq, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '界'.repeat(20000) }] } } }))
++    const inspect = vi.fn(async () => ({ header: { id: one.sessionId }, events }))
++    const page = vi.fn(async () => ({ records: events.map(event => ({ type: 'event', event })), hasMore: false }))
++    const execution = sourceExecutionOf({ store: h.runtime.store, engine: h.runtime.engine, controller: { inspect, page } as never }, 'feishu')
++    const result = await execution.read({ ...scope, limit: 100 })
++    expect(Buffer.byteLength(JSON.stringify(result.records))).toBeLessThan(128 * 1024)
++    expect(result).toMatchObject({ truncated: true, hasMore: true })
++    expect(result.records.length).toBeGreaterThan(0)
++    expect(page).toHaveBeenCalledTimes(1)
++    await expect(execution.read({ ...scope, threadKey: 'github:1' })).rejects.toMatchObject({ code: 'executionScope' })
++    expect(page).toHaveBeenCalledTimes(1)
++    await expect(execution.read({ ...scope, limit: 101 })).rejects.toThrow('window')
++    expect(await source().read(scope)).toMatchObject({ history: 'unsupported', records: [] })
++  })
++})
