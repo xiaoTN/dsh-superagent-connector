@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Superagent 任务看板 · 设计稿</title>
+<style>
+  :root {
+    --bg: #f4f6fa;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --line: #e3e9f2;
+    --line-strong: #d5deea;
+    --ink: #172033;
+    --muted: #64748b;
+    --faint: #94a3b8;
+    --primary: #4f46e5;
+    --primary-soft: #eef2ff;
+    --blue: #2563eb;
+    --blue-soft: #eff6ff;
+    --amber: #b45309;
+    --amber-soft: #fff7ed;
+    --red: #b91c1c;
+    --red-soft: #fef2f2;
+    --green: #047857;
+    --green-soft: #ecfdf5;
+    --gray-soft: #f1f5f9;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #e9eef6;
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .frame {
+    width: 1360px;
+    height: 900px;
+    background: var(--bg);
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+  .frame + .frame { margin-top: 32px; }
+  .rail {
+    width: 56px;
+    flex: none;
+    background: #0f172a;
+    color: #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 0 12px;
+    gap: 8px;
+  }
+  .rail-logo {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(135deg, #6366f1, #4338ca);
+    color: #fff; font-weight: 700; font-size: 13px;
+    display: grid; place-items: center; margin-bottom: 10px;
+  }
+  .rail-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    display: grid; place-items: center; color: #94a3b8;
+    position: relative;
+  }
+  .rail-icon svg { width: 18px; height: 18px; }
+  .rail-icon.active { background: rgba(99,102,241,.22); color: #c7d2fe; }
+  .rail-icon.active::before {
+    content: ""; position: absolute; left: -10px; top: 9px;
+    width: 3px; height: 18px; border-radius: 2px; background: #818cf8;
+  }
+  .rail-spacer { flex: 1; }
+  .rail-avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #1e293b; color: #cbd5e1; display: grid; place-items: center;
+    font-size: 11px; border: 1px solid #334155;
+  }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .page-head {
+    flex: none;
+    padding: 18px 24px 14px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .page-head h1 { margin: 0; font-size: 21px; letter-spacing: -.2px; }
+  .page-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+  .head-actions { display: flex; align-items: center; gap: 8px; padding-top: 3px; }
+  .searchbox {
+    width: 264px; height: 32px; border: 1px solid var(--line-strong);
+    border-radius: 8px; background: var(--surface-2); color: var(--faint);
+    display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px;
+  }
+  .searchbox svg { width: 14px; height: 14px; flex: none; }
+  .btn {
+    height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .btn svg { width: 14px; height: 14px; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .attention-bar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 9px 24px; background: #fffbeb; border-bottom: 1px solid #fde68a;
+    color: #92400e; font-size: 12px;
+  }
+  .attention-bar strong { font-weight: 650; }
+  .attention-bar .sep { width: 1px; height: 12px; background: #fcd34d; }
+  .attention-bar .filter-link { margin-left: auto; color: #92400e; font-weight: 600; }
+  .board {
+    flex: 1; min-height: 0;
+    display: flex; gap: 12px;
+    padding: 14px 24px 8px;
+    overflow: hidden;
+  }
+  .col {
+    width: 240px; flex: none;
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .col-head {
+    flex: none; display: flex; align-items: center; gap: 7px;
+    padding: 0 2px 8px; font-size: 12px; font-weight: 650; color: #334155;
+  }
+  .col-dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; flex: none; }
+  .col-dot.blue { background: var(--blue); }
+  .col-dot.amber { background: #d97706; }
+  .col-dot.green { background: #059669; }
+  .col-count {
+    margin-left: 1px; min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 999px; background: #e7edf5; color: #475569;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 650;
+  }
+  .col-more { margin-left: auto; color: var(--faint); font-size: 11px; font-weight: 500; }
+  .cards { display: flex; flex-direction: column; gap: 9px; overflow: hidden; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 11px; padding: 11px 12px 10px;
+    display: flex; flex-direction: column; gap: 7px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.03);
+    position: relative;
+  }
+  .card.attention { border-color: #fcd34d; background: #fffef8; }
+  .card.active { border-color: #bfdbfe; background: #fbfdff; }
+  .card.active::before {
+    content: ""; position: absolute; left: -1px; top: 12px; bottom: 12px;
+    width: 3px; border-radius: 0 3px 3px 0; background: var(--blue);
+  }
+  .card h3 {
+    margin: 0; font-size: 12.8px; line-height: 1.38; font-weight: 650;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-summary {
+    margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 19px; padding: 0 7px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 650; white-space: nowrap;
+  }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .pill.blue { color: #1d4ed8; background: var(--blue-soft); }
+  .pill.amber { color: #92400e; background: var(--amber-soft); }
+  .pill.red { color: #991b1b; background: var(--red-soft); }
+  .pill.green { color: #047857; background: var(--green-soft); }
+  .pill.gray { color: #475569; background: var(--gray-soft); }
+  .source {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 19px; padding: 0 6px; border-radius: 5px;
+    background: #f1f5f9; color: #475569; font-size: 10.5px; font-weight: 550;
+  }
+  .source svg { width: 11px; height: 11px; }
+  .card-foot {
+    display: flex; align-items: center; gap: 7px; color: var(--faint);
+    font-size: 10.5px; border-top: 1px dashed #eef2f7; padding-top: 7px;
+  }
+  .card-foot .pr { margin-left: auto; color: var(--primary); font-weight: 600; }
+  .avatar-stack { display: inline-flex; align-items: center; }
+  .mini-avatar {
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #e0e7ff; color: #4338ca; border: 1.5px solid #fff;
+    display: grid; place-items: center; font-size: 8px; font-weight: 700;
+  }
+  .mock-note {
+    position: absolute; right: 18px; bottom: 8px;
+    color: #94a3b8; font-size: 10px; letter-spacing: .2px;
+  }
+  .frame-label {
+    position: absolute; left: 20px; bottom: 8px;
+    color: #94a3b8; font-size: 10px;
+  }
+
+  /* detail */
+  .detail-head {
+    flex: none; background: var(--surface); border-bottom: 1px solid var(--line);
+    padding: 13px 24px 14px;
+  }
+  .back { color: var(--muted); font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; margin-bottom: 7px; }
+  .detail-title-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .detail-title-row h1 { margin: 0; font-size: 19px; letter-spacing: -.2px; }
+  .detail-meta { margin-top: 5px; color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 8px; }
+  .detail-meta .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: #64748b; }
+  .detail-meta .spacer { flex: 1; }
+  .detail-body { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 14px 24px 10px; overflow: hidden; }
+  .detail-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px 14px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 12px; font-weight: 650; color: #334155; display: flex; align-items: center; gap: 6px; }
+  .panel h2 .hint { color: var(--faint); font-weight: 500; font-size: 10.5px; }
+  .panel p { margin: 0; color: #334155; font-size: 12px; line-height: 1.6; }
+  .kv { display: grid; grid-template-columns: 86px 1fr; gap: 5px 10px; font-size: 11.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; color: #334155; }
+  .link-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--primary); font-weight: 550; }
+  .link-line svg { width: 13px; height: 13px; }
+  .activity { display: flex; flex-direction: column; gap: 7px; }
+  .activity-item { display: flex; gap: 8px; font-size: 11.5px; color: #334155; }
+  .activity-item .who { color: var(--muted); flex: none; width: 64px; }
+  .activity-item .when { color: var(--faint); flex: none; margin-left: auto; font-size: 10.5px; }
+  .activity-item .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .runs {
+    width: 392px; flex: none; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 11px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .runs-head {
+    flex: none; padding: 12px 14px 10px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .runs-head h2 { margin: 0; font-size: 13px; font-weight: 650; }
+  .runs-head .sub { color: var(--muted); font-size: 11px; }
+  .run-stats {
+    flex: none; display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 1px; margin: 0 14px; padding: 8px 0 9px; border-bottom: 1px solid #eef2f7;
+  }
+  .run-stats div { display: flex; flex-direction: column; gap: 1px; }
+  .run-stats span { color: var(--faint); font-size: 10px; }
+  .run-stats strong { font-size: 13px; font-weight: 650; color: #334155; }
+  .run-stats strong.blue { color: var(--blue); }
+  .runs-list { flex: 1; min-height: 0; overflow: hidden; padding: 4px 0; }
+  .run {
+    padding: 10px 14px 10px 22px; position: relative;
+  }
+  .run::before {
+    content: ""; position: absolute; left: 13px; top: 0; bottom: 0;
+    width: 1px; background: #e8eef6;
+  }
+  .run:first-child::before { top: 16px; }
+  .run:last-child::before { bottom: calc(100% - 16px); }
+  .run::after {
+    content: ""; position: absolute; left: 9.5px; top: 14px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #cbd5e1; border: 2px solid var(--surface);
+  }
+  .run.active { background: #f8fbff; }
+  .run.active::after { background: var(--blue); box-shadow: 0 0 0 3px #dbeafe; }
+  .run-top { display: flex; align-items: center; gap: 6px; }
+  .run-title { font-size: 11.5px; font-weight: 650; color: #334155; }
+  .run-top .spacer { flex: 1; }
+  .run-time { color: var(--faint); font-size: 10.5px; white-space: nowrap; }
+  .run-sub { margin-top: 3px; color: var(--muted); font-size: 10.5px; display: flex; align-items: center; gap: 5px; }
+  .run-summary {
+    margin: 5px 0 0; color: #334155; font-size: 11.3px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .run-actions { margin-top: 5px; display: flex; align-items: center; gap: 10px; font-size: 10.5px; }
+  .run-actions .open { color: var(--primary); font-weight: 600; }
+  .run-actions .pr { color: var(--muted); }
+  .runs-foot { flex: none; padding: 8px 14px; border-top: 1px solid var(--line); display: flex; }
+  .runs-foot .all { color: var(--primary); font-size: 11px; font-weight: 600; }
+
+  /* transcript drawer */
+  .scrim { position: absolute; inset: 0; background: rgba(15,23,42,.28); }
+  .drawer {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 760px;
+    background: var(--surface); border-left: 1px solid var(--line-strong);
+    display: flex; flex-direction: column; box-shadow: -18px 0 40px rgba(15,23,42,.12);
+  }
+  .drawer-head { flex: none; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; gap: 10px; }
+  .eyebrow { font-size: 10.5px; color: var(--muted); font-weight: 600; letter-spacing: .3px; text-transform: uppercase; }
+  .drawer-head h2 { margin: 2px 0 0; font-size: 18px; }
+  .drawer-head .close {
+    margin-left: auto; width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    display: grid; place-items: center; font-size: 16px; line-height: 1;
+  }
+  .drawer-meta { flex: none; padding: 9px 18px; color: var(--muted); font-size: 11px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .drawer-meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #475569; }
+  .outcome {
+    flex: none; margin: 12px 18px 0; padding: 10px 12px; border-radius: 9px;
+    background: var(--green-soft); border: 1px solid #a7f3d0; color: #065f46; font-size: 11.5px;
+  }
+  .outcome strong { font-weight: 700; }
+  .outcome a { color: #047857; text-decoration: underline; }
+  .drawer-tools { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 18px 8px; }
+  .chip {
+    height: 25px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--muted); font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .chip.on { background: var(--primary-soft); border-color: #c7d2fe; color: #4338ca; font-weight: 600; }
+  .chip.search { margin-left: auto; width: 160px; justify-content: flex-start; color: var(--faint); }
+  .timeline { flex: 1; min-height: 0; overflow: hidden; padding: 4px 18px 8px; }
+  .event { display: flex; gap: 12px; padding: 7px 0; position: relative; }
+  .event + .event { border-top: 1px solid #f1f5f9; }
+  .event-time { width: 58px; flex: none; color: var(--faint); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding-top: 2px; }
+  .event-body { flex: 1; min-width: 0; }
+  .event-who { font-size: 11px; font-weight: 650; color: #334155; display: flex; align-items: center; gap: 6px; }
+  .event-who .kind { font-weight: 500; color: var(--faint); font-size: 10px; }
+  .event p { margin: 3px 0 0; font-size: 11.5px; color: #334155; line-height: 1.5; }
+  .event .tool {
+    margin-top: 4px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--surface-2); padding: 7px 9px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px; color: #475569; line-height: 1.55;
+  }
+  .event .tool .tool-name { color: #4338ca; font-weight: 650; }
+  .event .tool .ok { color: #047857; }
+  .event .tool .trunc { color: #b45309; }
+  .event .tool .more { color: var(--faint); }
+  .event.done .event-who { color: #047857; }
+  .drawer-foot { flex: none; border-top: 1px solid var(--line); padding: 8px 18px; color: var(--faint); font-size: 10px; display: flex; gap: 8px; }
+  .drawer-foot .spacer { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- ======================= 1. BOARD ======================= -->
+<section class="frame" id="board" aria-label="任务看板设计稿">
+  <aside class="rail">
+    <div class="rail-logo">S</div>
+    <div class="rail-icon" title="Superagent">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.4-.7L4 21l1.7-4.3a8.2 8.2 0 0 1-1.2-4.2A8.4 8.4 0 0 1 13 4.2a8.4 8.4 0 0 1 8 7.3Z"/></svg>
+    </div>
+    <div class="rail-icon active" title="任务看板">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="9" rx="1.5"/></svg>
+    </div>
+    <div class="rail-icon" title="会话">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-avatar">XT</div>
+  </aside>
+
+  <main class="main">
+    <header class="page-head">
+      <div>
+        <h1>任务看板</h1>
+        <p class="page-sub">本机 Superagent · 最后同步 12:41:08 · 10 个工单</p>
+      </div>
+      <div class="head-actions">
+        <div class="searchbox">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+          搜索标题、工单或摘要
+        </div>
+        <button class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>刷新</button>
+      </div>
+    </header>
+
+    <div class="attention-bar">
+      <strong>需要你处理 2</strong>
+      <span class="sep"></span>
+      <span>等待审阅 1</span>
+      <span>·</span>
+      <span>等你回答 1</span>
+      <span class="filter-link">只看需要我 →</span>
+    </div>
+
+    <div class="board">
+      <section class="col">
+        <header class="col-head"><span class="col-dot amber"></span>等你处理<span class="col-count">2</span><span class="col-more">优先</span></header>
+        <div class="cards">
+          <article class="card attention">
+            <h3>为 Superagent 插件自建任务看板</h3>
+            <div class="meta-row"><span class="pill amber">等待审阅</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>桌面</span></div>
+            <p class="card-summary">设计稿已提交，PR #12 等待审阅；包含看板、执行记录和时间线。</p>
+            <div class="card-foot"><span class="avatar-stack"><span class="mini-avatar">XT</span></span><span>3 次运行</span><span>·</span><span>2 分钟前</span><span class="pr">PR #12</span></div>
+          </article>
+          <article class="card attention">
+            <h3>修复任务看板在窄屏下的横向滚动</h3>
+            <div class="meta-row"><span class="pill amber">等你回答</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8"/><path d="M12 17h.01"/></svg>GitHub</span></div>
+            <p class="card-summary">需要确认：已结束列默认只展示最近 20 个，还是提供全部历史？</p>
+            <div class="card-foot"><span class="avatar-stack"><span class="mini-avatar">XT</span></span><span>1 次运行</span><span>·</span><span>18 分钟前</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col">
+        <header class="col-head"><span class="col-dot blue"></span>执行中<span class="col-count">1</span><span class="col-more">实时</span></header>
+        <div class="cards">
+          <article class="card active">
+            <h3>补充任务看板执行记录测试</h3>
+            <div class="meta-row"><span class="pill blue"><span class="dot"></span>执行中</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>桌面</span></div>
+            <p class="card-summary">正在运行 node --test test/board.test.js，验证运行记录与脱敏投影。</p>
+            <div class="card-foot"><span class="avatar-stack"><span class="mini-avatar">XT</span></span><span>第 2 次运行</span><span>·</span><span>12 秒前</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col">
+        <header class="col-head"><span class="col-dot"></span>排队中<span class="col-count">1</span></header>
+        <div class="cards">
+          <article class="card">
+            <h3>更新 0.3.0 发布说明</h3>
+            <div class="meta-row"><span class="pill gray">排队中</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8"/><path d="M12 17h.01"/></svg>GitHub</span></div>
+            <p class="card-summary">等待执行槽位；上一个 0.3.0 验收任务仍在运行。</p>
+            <div class="card-foot"><span>等待槽位</span><span>·</span><span>26 分钟前</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col">
+        <header class="col-head"><span class="col-dot"></span>等待触发<span class="col-count">2</span></header>
+        <div class="cards">
+          <article class="card">
+            <h3>整理 connector 安装说明</h3>
+            <div class="meta-row"><span class="pill gray">等待触发</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>桌面</span></div>
+            <p class="card-summary">本轮已结束，等待新的消息或 GitHub 触发。</p>
+            <div class="card-foot"><span>2 次运行</span><span>·</span><span>1 小时前</span></div>
+          </article>
+          <article class="card">
+            <h3>检查 GitHub PR 自动合并</h3>
+            <div class="meta-row"><span class="pill gray">等待触发</span><span class="source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8"/><path d="M12 17h.01"/></svg>GitHub</span></div>
+            <p class="card-summary">PR #9 已合并；等待下一次 CI 或评论触发。</p>
+            <div class="card-foot"><span>1 次运行</span><span>·</span><span>2 小时前</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col">
+        <header class="col-head"><span class="col-dot green"></span>已结束<span class="col-count">4</span><span class="col-more">查看全部</span></header>
+        <div class="cards">
+          <article class="card">
+            <h3>重命名 Superagent 入口</h3>
+            <div class="meta-row"><span class="pill green">已完成</span><span class="source">桌面</span></div>
+            <p class="card-summary">入口名称与面板标题已改为 Superagent。</p>
+            <div class="card-foot"><span>1 次运行</span><span>·</span><span>3 小时前</span></div>
+          </article>
+          <article class="card">
+            <h3>接通桌面端对话来源</h3>
+            <div class="meta-row"><span class="pill green">已合并</span><span class="source">GitHub</span></div>
+            <p class="card-summary">desktop-inbox Source 已通过端到端验收。</p>
+            <div class="card-foot"><span>2 次运行</span><span>·</span><span>昨天</span></div>
+          </article>
+          <article class="card">
+            <h3>更新第三方看板补丁说明</h3>
+            <div class="meta-row"><span class="pill gray">已停止</span><span class="source">桌面</span></div>
+            <p class="card-summary">工单被人停止；保留原始结论，不标记为成功。</p>
+            <div class="card-foot"><span>1 次运行</span><span>·</span><span>昨天</span></div>
+          </article>
+          <article class="card">
+            <h3>修复桥接 token 校验</h3>
+            <div class="meta-row"><span class="pill green">已完成</span><span class="source">桌面</span></div>
+            <p class="card-summary">改为常量时间比较，并补充拒绝非法长度的测试。</p>
+            <div class="card-foot"><span>1 次运行</span><span>·</span><span>2 天前</span></div>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <span class="frame-label">设计稿 · 合成数据，不是实现截图</span>
+  </main>
+</section>
+
+<!-- ======================= 2. DETAIL ======================= -->
+<section class="frame" id="detail" aria-label="工单详情与执行记录设计稿">
+  <aside class="rail">
+    <div class="rail-logo">S</div>
+    <div class="rail-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.4-.7L4 21l1.7-4.3a8.2 8.2 0 0 1-1.2-4.2A8.4 8.4 0 0 1 13 4.2a8.4 8.4 0 0 1 8 7.3Z"/></svg>
+    </div>
+    <div class="rail-icon active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="9" rx="1.5"/></svg>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-avatar">XT</div>
+  </aside>
+
+  <main class="main">
+    <header class="detail-head">
+      <div class="back">← 任务看板</div>
+      <div class="detail-title-row">
+        <h1>为 Superagent 插件自建任务看板</h1>
+        <span class="pill blue"><span class="dot"></span>执行中</span>
+      </div>
+      <div class="detail-meta">
+        <span class="id">t-8f2a9c</span><span>·</span><span>桌面对话</span><span>·</span><span>更新于 12:38</span><span>·</span><span>3 次运行</span>
+        <span class="spacer"></span>
+        <button class="btn primary">继续对话</button>
+      </div>
+    </header>
+
+    <div class="detail-body">
+      <div class="detail-left">
+        <section class="panel">
+          <h2>任务说明</h2>
+          <p>参考 multica 的任务与运行模型，设计一个 connector 自带的任务看板。先出设计，评审后再实现；要求能查看每个工单每一次执行的记录，不再依赖第三方任务看板。</p>
+        </section>
+
+        <section class="panel">
+          <h2>摘要 <span class="hint">最近一次报告</span></h2>
+          <p>设计稿已提交到 <strong>docs/task-board-design.md</strong>：connector 自带只读看板，按 Superagent 阶段分列，工单详情固定执行记录；每次 Assignment 是一条运行，可打开 worker 会话时间线。下一步等待设计评审，再进入看板列表与详情实现。</p>
+        </section>
+
+        <section class="panel">
+          <h2>来源与授权</h2>
+          <dl class="kv">
+            <dt>来源</dt><dd>桌面 · desktop-inbox</dd>
+            <dt>发起人</dt><dd>desktop-owner</dd>
+            <dt>范围</dt><dd>为 Superagent 插件设计任务看板，参考 multica</dd>
+            <dt>入口</dt><dd>direct（明确请求）</dd>
+            <dt>执行器</dt><dd>worker-t-8f2a9c</dd>
+            <dt>Policy</dt><dd>2026-11-07.1</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2>关联链接</h2>
+          <div class="link-line">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"/></svg>
+            dsh-superagent-connector #12 · 设计稿
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>活动 <span class="hint">最近 4 条</span></h2>
+          <div class="activity">
+            <div class="activity-item"><span class="who">你</span><span class="text">设计一下看板，参考 multica</span><span class="when">12:30</span></div>
+            <div class="activity-item"><span class="who">Superagent</span><span class="text">我先读 connector 和 multica 的实现…</span><span class="when">12:30</span></div>
+            <div class="activity-item"><span class="who">你</span><span class="text">执行记录要看得到每次运行</span><span class="when">12:36</span></div>
+            <div class="activity-item"><span class="who">Superagent</span><span class="text">已补上运行记录与时间线设计</span><span class="when">12:38</span></div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="runs">
+        <header class="runs-head"><h2>执行记录</h2><span class="sub">3 次运行 · 1 次进行中</span></header>
+        <div class="run-stats">
+          <div><span>成功</span><strong>2</strong></div>
+          <div><span>进行中</span><strong class="blue">1</strong></div>
+          <div><span>总耗时</span><strong>6m 37s</strong></div>
+        </div>
+        <div class="runs-list">
+          <div class="run active">
+            <div class="run-top"><span class="run-title">第 3 次运行</span><span class="pill blue"><span class="dot"></span>执行中</span><span class="spacer"></span><span class="run-time">12:36 –</span></div>
+            <div class="run-sub">你 · 看板设计 · 桌面对话</div>
+            <p class="run-summary">正在补充执行记录的数据投影和脱敏边界，准备更新设计稿。</p>
+            <div class="run-actions"><span class="open">查看记录</span><span class="pr">1m 20s</span></div>
+          </div>
+          <div class="run">
+            <div class="run-top"><span class="run-title">第 2 次运行</span><span class="pill green">已完成</span><span class="spacer"></span><span class="run-time">12:30 – 12:32</span></div>
+            <div class="run-sub">你 · 补充设计 · 桌面对话</div>
+            <p class="run-summary">设计稿已提交，PR #12 包含看板、执行记录和时间线。</p>
+            <div class="run-actions"><span class="open">查看记录</span><span class="pr">2m 05s · PR #12</span></div>
+          </div>
+          <div class="run">
+            <div class="run-top"><span class="run-title">第 1 次运行</span><span class="pill green">已完成</span><span class="spacer"></span><span class="run-time">12:10 – 12:13</span></div>
+            <div class="run-sub">你 · 调研 multica · 桌面对话</div>
+            <p class="run-summary">已整理 multica 的看板、执行日志和运行时间线实现。</p>
+            <div class="run-actions"><span class="open">查看记录</span><span class="pr">3m 12s</span></div>
+          </div>
+        </div>
+        <div class="runs-foot"><span class="all">查看全部运行</span></div>
+      </aside>
+    </div>
+
+    <span class="frame-label">设计稿 · 合成数据，不是实现截图</span>
+  </main>
+</section>
+
+<!-- ======================= 3. TRANSCRIPT ======================= -->
+<section class="frame" id="transcript" aria-label="运行时间线设计稿">
+  <aside class="rail">
+    <div class="rail-logo">S</div>
+    <div class="rail-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.4-.7L4 21l1.7-4.3a8.2 8.2 0 0 1-1.2-4.2A8.4 8.4 0 0 1 13 4.2a8.4 8.4 0 0 1 8 7.3Z"/></svg>
+    </div>
+    <div class="rail-icon active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="9" rx="1.5"/></svg>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-avatar">XT</div>
+  </aside>
+
+  <main class="main">
+    <header class="detail-head">
+      <div class="back">← 任务看板</div>
+      <div class="detail-title-row">
+        <h1>为 Superagent 插件自建任务看板</h1>
+        <span class="pill blue"><span class="dot"></span>执行中</span>
+      </div>
+      <div class="detail-meta"><span class="id">t-8f2a9c</span><span>·</span><span>桌面对话</span><span>·</span><span>3 次运行</span></div>
+    </header>
+    <div class="detail-body">
+      <div class="detail-left">
+        <section class="panel"><h2>摘要</h2><p>设计稿已提交，工单详情固定执行记录；每次 Assignment 是一条运行，可打开 worker 会话时间线。</p></section>
+        <section class="panel"><h2>来源与授权</h2><dl class="kv"><dt>来源</dt><dd>桌面 · desktop-inbox</dd><dt>发起人</dt><dd>desktop-owner</dd><dt>范围</dt><dd>为 Superagent 插件设计任务看板</dd></dl></section>
+      </div>
+      <aside class="runs">
+        <header class="runs-head"><h2>执行记录</h2><span class="sub">3 次运行 · 1 次进行中</span></header>
+        <div class="runs-list">
+          <div class="run active"><div class="run-top"><span class="run-title">第 3 次运行</span><span class="pill blue"><span class="dot"></span>执行中</span></div><p class="run-summary">正在补充执行记录的数据投影…</p></div>
+          <div class="run"><div class="run-top"><span class="run-title">第 2 次运行</span><span class="pill green">已完成</span></div><p class="run-summary">设计稿已提交，PR #12。</p></div>
+          <div class="run"><div class="run-top"><span class="run-title">第 1 次运行</span><span class="pill green">已完成</span></div><p class="run-summary">已整理 multica 的实现。</p></div>
+        </div>
+        <div class="runs-foot"><span class="all">查看全部运行</span></div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="scrim"></div>
+  <aside class="drawer" aria-label="运行时间线">
+    <header class="drawer-head">
+      <div>
+        <div class="eyebrow">第 2 次运行</div>
+        <h2>已完成 <span class="pill green" style="vertical-align:middle">设计稿已提交</span></h2>
+      </div>
+      <button class="close" aria-label="关闭">×</button>
+    </header>
+    <div class="drawer-meta">
+      <span>桌面对话</span><span>·</span><span>2m 05s</span><span>·</span><span>12:30 – 12:32</span><span>·</span><code>worker-t-8f2a9c</code>
+    </div>
+    <div class="outcome"><strong>结局</strong> · 设计稿已提交 · <a>PR #12</a></div>
+    <div class="drawer-tools">
+      <span class="chip on">本次运行</span><span class="chip">全部运行</span>
+      <span class="chip search">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        搜索记录
+      </span>
+      <span class="chip">最新在前</span>
+    </div>
+    <div class="timeline">
+      <div class="event"><div class="event-time">12:30:02</div><div class="event-body"><div class="event-who">你 <span class="kind">用户消息</span></div><p>设计一下看板，参考 multica；先出设计，不要直接改插件。</p></div></div>
+      <div class="event"><div class="event-time">12:30:05</div><div class="event-body"><div class="event-who">Superagent <span class="kind">助手</span></div><p>我先读 connector 和 multica 的看板/执行日志实现，再写设计稿。</p></div></div>
+      <div class="event"><div class="event-time">12:30:11</div><div class="event-body"><div class="event-who">工具 <span class="kind">读取文件</span></div><div class="tool"><span class="tool-name">read</span> multica/packages/views/issues/components/board-view.tsx<br><span class="ok">已读取 1,017 行</span> · <span class="more">展开</span></div></div></div>
+      <div class="event"><div class="event-time">12:30:24</div><div class="event-body"><div class="event-who">工具 <span class="kind">读取文件</span></div><div class="tool"><span class="tool-name">read</span> multica/packages/views/issues/components/execution-log-section.tsx<br><span class="ok">已读取 851 行</span> · <span class="more">展开</span></div></div></div>
+      <div class="event"><div class="event-time">12:30:40</div><div class="event-body"><div class="event-who">工具 <span class="kind">shell</span></div><div class="tool"><span class="tool-name">$</span> git status --short<br><span class="ok">2 files changed</span> · <span class="more">展开</span></div></div></div>
+      <div class="event"><div class="event-time">12:31:02</div><div class="event-body"><div class="event-who">Superagent <span class="kind">助手</span></div><p>设计稿已写入 <code>docs/task-board-design.md</code>，包含看板、执行记录和时间线。</p></div></div>
+      <div class="event"><div class="event-time">12:31:40</div><div class="event-body"><div class="event-who">工具 <span class="kind">编辑文件</span></div><div class="tool"><span class="tool-name">edit</span> docs/task-board-design.md<br><span class="ok">+248 −0</span> · <span class="trunc">长输出已截断</span> · <span class="more">展开</span></div></div></div>
+      <div class="event"><div class="event-time">12:31:58</div><div class="event-body"><div class="event-who">Superagent <span class="kind">助手</span></div><p>设计稿已提交：<span style="color:#4f46e5">PR #12</span>，等待评审。</p></div></div>
+      <div class="event done"><div class="event-time">12:32:00</div><div class="event-body"><div class="event-who">运行结束 <span class="kind">完成</span></div><p>已提交 ready 报告；没有修改看板以外的文件。</p></div></div>
+    </div>
+    <footer class="drawer-foot">只读 · 已脱敏 · 本次运行 46 条事件 · 2 条工具输出已截断<span class="spacer"></span>每 2 秒追加</footer>
+  </aside>
+
+  <span class="frame-label">设计稿 · 合成数据，不是实现截图</span>
+</section>
+
+<script>
+  // Render one frame at a time for screenshots: ?only=board|detail|transcript
+  const only = new URLSearchParams(location.search).get('only')
+  if (only) {
+    document.querySelectorAll('.frame').forEach(frame => { if (frame.id !== only) frame.remove() })
+  }
+</script>
+</body>
+</html>
