@@ -907,6 +907,29 @@ test('Source acknowledgement and reply quote the exact human message they answer
   app.dispose()
 })
 
+test('a ticket-level result quotes the message its ticket started from, even before its acknowledgement row', async () => {
+  const app = fixture(), root = app.mount()
+  const request = { ...reply, id: 'trigger-request', role: 'user', kind: 'request', text: '你这个答复界面要优化一下，优化成像飞书话题一样的。', at: '2026-11-08T02:33:17.035Z' }
+  const ticketId = 'ticket-3f020097'
+  const ack = { id: outboxKey('ack', request.id), role: 'assistant', kind: 'acknowledgement', ticketId, text: '收到：把答复界面改成飞书话题式。', at: '2026-11-08T02:33:55.378Z' }
+  const resultText = '答复界面已改成飞书话题式：每条“已接收/答复”上方会显示它所回复的原消息。'
+  const result = { id: outboxKey('reply', ticketId, resultText), role: 'assistant', kind: 'reply', ticketId, text: resultText, at: '2026-11-08T02:54:57.000Z' }
+  const orphanText = 'no sibling answer binds this ticket to a message'
+  const orphan = { id: outboxKey('reply', 'ticket-nobody', orphanText), role: 'assistant', kind: 'reply', ticketId: 'ticket-nobody', text: orphanText, at: '2026-11-08T02:55:00.000Z' }
+  // Deliberately put the result before the acknowledgement: the ticket link must not depend on row order.
+  app.backend.messages = [request, result, ack, orphan]
+  await app.flush()
+  const resultNode = nodes(root.tree, node => node.props['data-superagent-source'] === result.id)[0]
+  assert.ok(resultNode, 'the result row is rendered')
+  const quote = nodes(resultNode, node => node.props['data-superagent-reply-to'] !== undefined)[0]
+  assert.ok(quote, 'the ticket result carries the same quote block as a direct reply')
+  assert.equal(quote.props['data-superagent-reply-to'], request.id)
+  assert.match(contents(quote), /你这个答复界面要优化一下/)
+  const orphanNode = nodes(root.tree, node => node.props['data-superagent-source'] === orphan.id)[0]
+  assert.equal(nodes(orphanNode, node => node.props['data-superagent-reply-to'] !== undefined).length, 0, 'an unbound ticket result stays unquoted')
+  app.dispose()
+})
+
 test('a Source reply with no resolvable human message stays unquoted instead of guessing by position', async () => {
   const app = fixture(), root = app.mount()
   app.backend.messages = [

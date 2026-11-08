@@ -34,7 +34,7 @@ The Source conversation journal is the authority for confirmed history and is no
 
 ### Replies and topics
 
-`acknowledgement` and `reply` deliveries quote the exact human message they answer, Feishu-topic style: accent bar, original text and time. The target is resolved from the reply event's deterministic id against the confirmed Source history, so a late answer after several messages is never attributed by position. An old or unresolvable id deliberately renders no quote instead of guessing. Resolution reads confirmed history only: no extra request, no Source rewrite.
+`acknowledgement`, `reply` and ticket-level results all render a Feishu-topic-style quote: accent bar, original text and time. A direct answer resolves its target from the reply event's deterministic id against the confirmed Source history; a ticket-level result (such as the final completion notice) has no such id, so it quotes the human message already bound to the same ticket (the ticket's opening message when available) in the same visual style. A late answer after several messages is never attributed by position; an old or unresolvable id deliberately renders no quote instead of guessing. Resolution reads confirmed history only: no extra request, no Source rewrite.
 
 ### Real images and files
 

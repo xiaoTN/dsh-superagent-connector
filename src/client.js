@@ -160,7 +160,7 @@ window.__ModuleLoader__.load({
       if (!event || event.type !== 'superagent/source' || !event.data || event.data.customSource !== 'superagent' || event.data.conversationId !== 'main') return null;
       var record = event.data.event;
       if (!record || !Number.isSafeInteger(record.seq) || record.seq < 1 || typeof record.id !== 'string' || !record.id || (record.role !== 'assistant' && record.role !== 'user') || typeof record.text !== 'string' || (typeof record.at !== 'string' && typeof record.at !== 'number') || typeof record.kind !== 'string') return null;
-      rememberSourceUser(record);
+      rememberSource(record);
       return record;
     }
     // Feishu-style quoted replies. The Source journal has no explicit reply field, but every
@@ -204,21 +204,42 @@ window.__ModuleLoader__.load({
       return state.map(function(word){return ('00000000'+(word>>>0).toString(16)).slice(-8);}).join('');
     }
     function outboxKey(values){return sha256(JSON.stringify(values)).slice(0,32);}
-    var sourceUsers=new Map(),replyTargets=new Map();
-    function rememberSourceUser(entry){
-      if(entry.role!=='user'||sourceUsers.has(entry.id))return;
-      sourceUsers.set(entry.id,entry);replyTargets.clear();
-      if(sourceUsers.size>1000)sourceUsers.delete(sourceUsers.keys().next().value);
+    var sourceUsers=new Map(),sourceAssistants=new Map(),replyTargets=new Map(),ticketTargets=new Map();
+    function rememberSource(entry){
+      if(entry.role==='user'){
+        if(sourceUsers.has(entry.id))return;
+        sourceUsers.set(entry.id,entry);replyTargets.clear();
+        if(sourceUsers.size>1000)sourceUsers.delete(sourceUsers.keys().next().value);
+      }else if(entry.role==='assistant'&&!sourceAssistants.has(entry.id)){
+        sourceAssistants.set(entry.id,entry);
+        if(sourceAssistants.size>1000)sourceAssistants.delete(sourceAssistants.keys().next().value);
+      }
     }
-    function replyTarget(entry){
-      if(entry.role!=='assistant'||typeof entry.id!=='string'||typeof entry.text!=='string')return null;
+    function directReplyTarget(entry){
       if(replyTargets.has(entry.id))return replyTargets.get(entry.id);
       var users=Array.from(sourceUsers.values()),target=null;
-      // Newest first: an answer normally responds to a recent message; an unresolved id stays quoteless.
+      // Newest first: an answer normally responds to a recent message.
       for(var i=users.length-1;i>=0&&!target;i--){
         if(entry.id===outboxKey(['ack',users[i].id])||entry.id===outboxKey(['reply',users[i].id,entry.text]))target=users[i];
       }
       replyTargets.set(entry.id,target);return target;
+    }
+    function replyTarget(entry){
+      if(entry.role!=='assistant'||typeof entry.id!=='string'||typeof entry.text!=='string')return null;
+      var target=directReplyTarget(entry);
+      if(target){if(entry.ticketId&&!ticketTargets.has(entry.ticketId))ticketTargets.set(entry.ticketId,target);return target;}
+      // A ticket-level result (`key('reply', ticketId, text)`) names no human message directly.
+      // Quote the message a sibling answer of the same ticket already resolved; never guess by position.
+      if(!entry.ticketId)return null;
+      if(ticketTargets.has(entry.ticketId))return ticketTargets.get(entry.ticketId);
+      var siblings=Array.from(sourceAssistants.values());
+      for(var i=0;i<siblings.length;i++){
+        var sibling=siblings[i];
+        if(sibling.id===entry.id||sibling.ticketId!==entry.ticketId)continue;
+        var quoted=directReplyTarget(sibling);
+        if(quoted){ticketTargets.set(entry.ticketId,quoted);return quoted;}
+      }
+      return null;
     }
     function quoteText(value){
       var text=String(value??'').replace(/\s+/g,' ').trim();
