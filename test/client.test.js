@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+
+// The same deterministic outbox ids the Superagent core derives for replies.
+const outboxKey = (...values) => createHash('sha256').update(JSON.stringify(values)).digest('hex').slice(0, 32)
 
 const IDENTITY = '/@superagent-board/api/identity'
 const CHAT = '/@superagent-board/api/chat'
@@ -877,6 +881,41 @@ test('Source delivery body uses ordinary assistant typography without changing S
   assert.equal(nodes(body, node => node.type === 'native-markdown').length, 1)
   assert.equal(nodes(body, node => node.type === 'strong').length, 0, 'Source provenance stays in its separate metadata row')
   assert.equal(nodes(root.tree, node => node.props['data-superagent-source']).length, 1)
+  app.dispose()
+})
+
+test('Source acknowledgement and reply quote the exact human message they answer, like a Feishu topic reply', async () => {
+  const app = fixture(), root = app.mount()
+  const first = { ...reply, id: 'trigger-first', role: 'user', kind: 'request', text: '为什么这两个输入框还是不一样？', at: '2026-11-08T02:30:39.841Z' }
+  const second = { ...reply, id: 'trigger-second', role: 'user', kind: 'request', text: '如果我先后给你说两个相似的任务，你会合并到一个 session 里完成吗？', at: '2026-11-08T02:31:27.949Z' }
+  const ack = { id: outboxKey('ack', first.id), role: 'assistant', kind: 'acknowledgement', text: '收到：看下这两处输入框为何还是不一样，给你一个说明。', at: '2026-11-08T02:31:38.848Z' }
+  const answerText = '不一定。相似不等于合并：只有同一任务范围内的追问或续改会留在这个工单里继续。'
+  const answer = { id: outboxKey('reply', second.id, answerText), role: 'assistant', kind: 'reply', text: answerText, at: '2026-11-08T02:31:40.813Z' }
+  // Deliberately interleaved: the acknowledgement for the first message arrives after the second
+  // message, so quoting the nearest preceding row would be wrong; only the deterministic id matches.
+  app.backend.messages = [first, second, ack, answer]
+  await app.flush()
+  const quotes = nodes(root.tree, node => node.props['data-superagent-reply-to'] !== undefined)
+  assert.equal(quotes.length, 2)
+  assert.equal(quotes[0].props['data-superagent-reply-to'], first.id)
+  assert.match(contents(quotes[0]), /回复你的消息/)
+  assert.match(contents(quotes[0]), /为什么这两个输入框还是不一样/)
+  assert.equal(quotes[1].props['data-superagent-reply-to'], second.id)
+  assert.match(contents(quotes[1]), /如果我先后给你说两个相似的任务/)
+  // The quote is metadata above the reply body, never a replacement of the real Markdown content.
+  assert.equal(nodes(root.tree, node => node.props['data-superagent-delivery-content'] === true).length, 2)
+  app.dispose()
+})
+
+test('a Source reply with no resolvable human message stays unquoted instead of guessing by position', async () => {
+  const app = fixture(), root = app.mount()
+  app.backend.messages = [
+    { ...reply, id: 'some-trigger', role: 'user', kind: 'request', text: 'earlier human message' },
+    { ...reply, id: 'unrelated-result', role: 'assistant', kind: 'result', text: 'a ticket result with no direct question' },
+  ]
+  await app.flush()
+  assert.equal(nodes(root.tree, node => node.props['data-superagent-reply-to'] !== undefined).length, 0)
+  assert.equal(contents(root.tree).match(/earlier human message/g)?.length, 1)
   app.dispose()
 })
 

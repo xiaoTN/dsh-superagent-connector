@@ -136,7 +136,7 @@ window.__ModuleLoader__.load({
     var HISTORY_EDIT='button[aria-label="编辑"][title="编辑并重发：就地改完再发出去（新建会话，不动项目文件）"]';
     var HISTORY_ACTIONS=HISTORY_UNDO+','+HISTORY_EDIT;
     var nativeCss = sourceScope+' [data-slot="conversation.input.model"],'+sourceScope+' [data-slot="conversation.input.permission"],'+sourceScope+' [data-slot="conversation.input.plan"],'+sourceScope+' [data-slot="conversation.input.activity"],'+sourceScope+' [data-slot="conversation.input.left"],'+sourceScope+' [data-slot="conversation.input.right"],'+sourceScope+' [data-slot="conversation.input.overlay"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-slot="conversation.input.attachments"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-composer-card] button[aria-haspopup],'+sourceScope+' [data-composer-dock]{display:none!important}.sab-native,.sab-native-frame{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}.sab-native [data-conversation-content]{flex:1;min-height:0}[data-superagent-native="true"] [data-slot="conversation.session.header"],[data-superagent-native="true"] [data-slot="conversation.session.header.actions"],[data-superagent-native="true"] [data-slot="conversation.session.header.utilities"],[data-superagent-native="true"] [data-slot="conversation.session.header.corner"]{display:none!important}.sab-native-notice{padding:8px 16px;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b)}.sab-source-node{padding:12px 0;overflow-wrap:anywhere}.sab-source-content>:first-child{font-size:inherit!important;line-height:inherit!important;color:inherit!important}.sab-source-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b);margin-bottom:6px}.sab-executions{padding:8px 16px;flex:none;max-height:40%;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.sab-executions button:disabled{opacity:.5;cursor:not-allowed}.sab-executions [data-superagent-trace] pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.sab-executions select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,#fff);padding:6px;max-width:100%}';
-    nativeCss+=sourceScope+' '+HISTORY_UNDO+','+sourceScope+' '+HISTORY_EDIT+'{display:none!important}.sab-transport-status{font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.6;color:var(--dsw-alias-label-secondary,#64748b);padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);border-radius:8px}.sab-transport-status p{margin:4px 0}.sab-transport-uncertain{background:rgba(245,158,11,.08)}';
+    nativeCss+=sourceScope+' '+HISTORY_UNDO+','+sourceScope+' '+HISTORY_EDIT+'{display:none!important}.sab-transport-status{font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.6;color:var(--dsw-alias-label-secondary,#64748b);padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);border-radius:8px}.sab-transport-status p{margin:4px 0}.sab-transport-uncertain{background:rgba(245,158,11,.08)}.sab-source-quote{margin:0 0 8px;padding:7px 10px 7px 12px;border-left:3px solid var(--dsw-alias-border-l3,#cbd5e1);border-radius:6px;background:var(--dsw-alias-bg-layer-2,#f5f6f8);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.sab-source-quote-label{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-tertiary,#94a3b8);margin-bottom:2px}.sab-source-quote-text{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--dsw-alias-label-secondary,#64748b)}';
     function sourceSession(id) { return typeof id === 'string' && id.indexOf(SOURCE_PREFIX) === 0; }
     // Only Host native endpoints publish effective capabilities, never raw Source flags or upload receipts.
     var nativeCapabilities=new Map(), capabilityListeners=new Set(), NO_CAPABILITIES=Object.freeze({attachments:false});
@@ -160,13 +160,79 @@ window.__ModuleLoader__.load({
       if (!event || event.type !== 'superagent/source' || !event.data || event.data.customSource !== 'superagent' || event.data.conversationId !== 'main') return null;
       var record = event.data.event;
       if (!record || !Number.isSafeInteger(record.seq) || record.seq < 1 || typeof record.id !== 'string' || !record.id || (record.role !== 'assistant' && record.role !== 'user') || typeof record.text !== 'string' || (typeof record.at !== 'string' && typeof record.at !== 'number') || typeof record.kind !== 'string') return null;
+      rememberSourceUser(record);
       return record;
+    }
+    // Feishu-style quoted replies. The Source journal has no explicit reply field, but every
+    // acknowledgement/reply id is the deterministic key of the Trigger it answers
+    // (`key('ack', triggerId)` / `key('reply', triggerId, text)`), and the Trigger id is the id of
+    // the user event already in the transcript. Recover the target locally; an unknown or rewritten
+    // id simply renders the reply without a quote rather than guessing by position.
+    var SOURCE_K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    function rotateRight(value,bits){return (value>>>bits)|(value<<(32-bits));}
+    function utf8Bytes(value){
+      var text=String(value),bytes=[];
+      for(var i=0;i<text.length;i++){
+        var code=text.charCodeAt(i);
+        if(code<0x80)bytes.push(code);
+        else if(code<0x800)bytes.push(0xc0|code>>6,0x80|code&63);
+        else if(code>=0xd800 && code<=0xdbff && i+1<text.length){var point=0x10000+((code-0xd800)<<10)+(text.charCodeAt(++i)-0xdc00);bytes.push(0xf0|point>>18,0x80|point>>12&63,0x80|point>>6&63,0x80|point&63);}
+        else bytes.push(0xe0|code>>12,0x80|code>>6&63,0x80|code&63);
+      }
+      return bytes;
+    }
+    function sha256(value){
+      var bytes=utf8Bytes(value),bits=bytes.length*8;
+      bytes.push(0x80);while(bytes.length%64!==56)bytes.push(0);
+      // 64-bit big-endian length: the high 32 bits stay zero for every id-sized input.
+      bytes.push(0,0,0,0,(bits>>>24)&255,(bits>>>16)&255,(bits>>>8)&255,bits&255);
+      var state=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+      for(var offset=0;offset<bytes.length;offset+=64){
+        var words=[],t;
+        for(t=0;t<16;t++)words[t]=(bytes[offset+t*4]<<24)|(bytes[offset+t*4+1]<<16)|(bytes[offset+t*4+2]<<8)|bytes[offset+t*4+3];
+        for(t=16;t<64;t++)words[t]=(words[t-16]+(rotateRight(words[t-15],7)^rotateRight(words[t-15],18)^(words[t-15]>>>3))+words[t-7]+(rotateRight(words[t-2],17)^rotateRight(words[t-2],19)^(words[t-2]>>>10)))|0;
+        var a=state[0],b=state[1],c=state[2],d=state[3],e=state[4],f=state[5],g=state[6],h2=state[7];
+        for(t=0;t<64;t++){
+          var select=(e&f)^(~e&g),majority=(a&b)^(a&c)^(b&c);
+          var first=(h2+(rotateRight(e,6)^rotateRight(e,11)^rotateRight(e,25))+select+SOURCE_K[t]+words[t])|0;
+          var second=((rotateRight(a,2)^rotateRight(a,13)^rotateRight(a,22))+majority)|0;
+          h2=g;g=f;f=e;e=(d+first)|0;d=c;c=b;b=a;a=(first+second)|0;
+        }
+        state[0]=(state[0]+a)|0;state[1]=(state[1]+b)|0;state[2]=(state[2]+c)|0;state[3]=(state[3]+d)|0;
+        state[4]=(state[4]+e)|0;state[5]=(state[5]+f)|0;state[6]=(state[6]+g)|0;state[7]=(state[7]+h2)|0;
+      }
+      return state.map(function(word){return ('00000000'+(word>>>0).toString(16)).slice(-8);}).join('');
+    }
+    function outboxKey(values){return sha256(JSON.stringify(values)).slice(0,32);}
+    var sourceUsers=new Map(),replyTargets=new Map();
+    function rememberSourceUser(entry){
+      if(entry.role!=='user'||sourceUsers.has(entry.id))return;
+      sourceUsers.set(entry.id,entry);replyTargets.clear();
+      if(sourceUsers.size>1000)sourceUsers.delete(sourceUsers.keys().next().value);
+    }
+    function replyTarget(entry){
+      if(entry.role!=='assistant'||typeof entry.id!=='string'||typeof entry.text!=='string')return null;
+      if(replyTargets.has(entry.id))return replyTargets.get(entry.id);
+      var users=Array.from(sourceUsers.values()),target=null;
+      // Newest first: an answer normally responds to a recent message; an unresolved id stays quoteless.
+      for(var i=users.length-1;i>=0&&!target;i--){
+        if(entry.id===outboxKey(['ack',users[i].id])||entry.id===outboxKey(['reply',users[i].id,entry.text]))target=users[i];
+      }
+      replyTargets.set(entry.id,target);return target;
+    }
+    function quoteText(value){
+      var text=String(value??'').replace(/\s+/g,' ').trim();
+      return (text.length>220?text.slice(0,220)+'…':text) || '（无文字的消息）';
     }
     function SourceNode(props) {
       useIdentity();
       var entry=props.node.data, kinds={ack:'已接收',acknowledgement:'已接收',answer:'答复',reply:'答复',attention:'需要关注',result:'执行结果',notice:'通知',delivery:'Source 消息'};
+      var quote=replyTarget(entry);
       return h('section',{className:'sab-source-node','data-superagent-source':entry.id},
         h('div',{className:'sab-source-meta'},h('strong',null,agentName()),h('span',null,kinds[entry.kind] || text(entry.kind,'Source 消息',60)),h('span',null,when(entry.at)),entry.ticketId && h('code',null,text(entry.ticketId,'',128))),
+        quote && h('blockquote',{className:'sab-source-quote','data-superagent-reply-to':quote.id,title:'回复的消息'},
+          h('div',{className:'sab-source-quote-label'},h('span',null,'回复你的消息'),h('span',null,when(quote.at))),
+          h('div',{className:'sab-source-quote-text'},quoteText(quote.text))),
         // The public text-only Factory is compact by default; Source deliveries are not model reasoning.
         h('div',{className:'sab-source-content','data-superagent-delivery-content':true,style:{fontSize:'var(--dsh-content-font-size,14px)',lineHeight:'calc(24px + var(--dsh-content-font-delta,0px))',color:'var(--dsw-alias-label-primary,#172033)'}},
           props.renderFactorySlot('conversation.chat.reasoning.content',{text:sourceText(entry.text),running:false})));

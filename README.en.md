@@ -4,7 +4,7 @@ English · [简体中文](<README.md>)
 
 **Operate the real WSL SuperAgent through DSH's native conversation UI, and see its tickets in the task board you already installed. Not a renamed ordinary assistant or a second kanban.**
 
-> This documentation targets the planned **0.4.2** public release; the actual Release tag/archive remains authoritative. 0.4.0/0.4.1 were local staging only, without a public tag. Unofficial early software for one machine, one DSH owner and one SuperAgent repository. Existing worker command/root/GitHub/push/merge permissions are not reduced. Read the [security model](<SECURITY.md>) first.
+> This documentation targets the planned **0.4.3** public release; the actual Release tag/archive remains authoritative. 0.4.0/0.4.1 were local staging only, without a public tag. Unofficial early software for one machine, one DSH owner and one SuperAgent repository. Existing worker command/root/GitHub/push/merge permissions are not reduced. Read the [security model](<SECURITY.md>) first.
 
 ## What is implemented
 
@@ -32,6 +32,10 @@ The local driver synchronously saves a separate durable outbox before native adm
 
 The Source conversation journal is the authority for confirmed history and is no longer truncated at 2000 entries. Reads are ordered, byte-bounded pages of at most **200 entries**. The old 2000-entry mirror remains only for rollback, not as the native-history limit. Reopening restores from Source, not invented confirmed replies from the local outbox. An unavailable/unloaded facade refuses input instead of falling back to an ordinary assistant. The current default UI still opens the project's `main` conversation; this is not a multi-instance or multi-tenant conversation manager.
 
+### Replies and topics
+
+`acknowledgement` and `reply` deliveries quote the exact human message they answer, Feishu-topic style: accent bar, original text and time. The target is resolved from the reply event's deterministic id against the confirmed Source history, so a late answer after several messages is never attributed by position. An old or unresolvable id deliberately renders no quote instead of guessing. Resolution reads confirmed history only: no extra request, no Source rewrite.
+
 ### Real images and files
 
 The path is native FileUploads → durable native-host refs → read actual bytes → **new WSL Source receipts** → prepare → atomic Source intake → commit → genuine read-only worker files.
@@ -58,7 +62,7 @@ RC.1 has no official native per-session capability interface. The connector uses
 
 ## Screenshots and verification status
 
-The [v0.2 simplified-chat screenshot](<docs/images/chat.png>) is historical material, **not** a 0.4.2 native Conversation screenshot or acceptance result.
+The [v0.2 simplified-chat screenshot](<docs/images/chat.png>) is historical material, **not** a 0.4.3 native Conversation screenshot or acceptance result.
 
 ![Historical screenshot: the existing task board, not a replacement board](<docs/images/native-board.png>)
 
