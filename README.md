@@ -4,7 +4,7 @@
 
 **在 DSH 原生聊天界面操作真实 WSL SuperAgent，让工单出现在已经安装的任务看板里。不是普通助手改名，也不是另一套看板。**
 
-> 本文对应计划正式发布的 **0.4.2**；正式标签和可安装归档以 Release 为准。0.4.0/0.4.1 仅为本机 staging，未发布公开标签。非官方、早期软件，仅面向单机、单个 DSH 所有者和单个 SuperAgent 仓库。现有 worker 的命令、root、GitHub、推送及合并权限不会被本插件降低。请先阅读[安全说明](<SECURITY.md>)。
+> 本文对应计划正式发布的 **0.4.3**；正式标签和可安装归档以 Release 为准。0.4.0/0.4.1 仅为本机 staging，未发布公开标签。非官方、早期软件，仅面向单机、单个 DSH 所有者和单个 SuperAgent 仓库。现有 worker 的命令、root、GitHub、推送及合并权限不会被本插件降低。请先阅读[安全说明](<SECURITY.md>)。
 
 ## 现在如何工作
 
@@ -32,6 +32,10 @@ Windows DSH：Source 事件及附件恢复 → 原生消息显示
 
 Source 会话 journal 是确认历史的事实来源，不再截断为 2000 条；按序分页读取，每页至多 **200 条**，另受字节预算约束。2000 条上限仅保留在旧版 rollback 镜像，不是原生对话历史上限。Facade 重开从 Source 恢复，不能从 outbox 伪造已确认回复；未加载/离线时拒绝发送，不回退普通助手。当前默认 UI 仍打开项目 `main` 对话，不能视为多实例或多租户会话管理器。
 
+### 回复与话题
+
+`acknowledgement` 和 `reply` 都显示它所答复的那条人消息的引用块（飞书话题式：左侧色条、原消息文字和时间），不再只靠消息顺序猜测回复对象。引用目标是按回复事件的确定性 id 与 Source 历史中的 Trigger/消息 id 匹配得出的，所以即使先后收到多条消息、答复晚到，也不会引错；旧消息或 id 无法解析时宁可不显示引用，不做位置猜测。该解析只在客户端读取已确认历史，不新增请求、不修改 Source 记录。
+
 ### 真正的图片与文件
 
 附件链路为：原生 FileUploads → 本机持久 ref → 读取真实 bytes → WSL Source **新** receipt → prepare → Source 原子收件 → commit → 受控 worker 的真实只读文件路径。
@@ -58,7 +62,7 @@ RC.1 没有官方原生 per-session capability 接口；当前采用 **Source �
 
 ## 界面与验证状态
 
-[旧版 v0.2 简化聊天截图](<docs/images/chat.png>)仅为历史资料，**不是** 0.4.2 原生 Conversation 截图或验收证据。
+[旧版 v0.2 简化聊天截图](<docs/images/chat.png>)仅为历史资料，**不是** 0.4.3 原生 Conversation 截图或验收证据。
 
 ![历史截图：沿用已有任务看板，不是新建看板](<docs/images/native-board.png>)
 
