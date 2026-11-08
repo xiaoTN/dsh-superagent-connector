@@ -135,8 +135,8 @@ window.__ModuleLoader__.load({
     var HISTORY_UNDO='button[aria-label="撤回"][title="整段回退：文件与对话一并回到该消息之前"]';
     var HISTORY_EDIT='button[aria-label="编辑"][title="编辑并重发：就地改完再发出去（新建会话，不动项目文件）"]';
     var HISTORY_ACTIONS=HISTORY_UNDO+','+HISTORY_EDIT;
-    var nativeCss = sourceScope+' [data-slot="conversation.input.model"],'+sourceScope+' [data-slot="conversation.input.permission"],'+sourceScope+' [data-slot="conversation.input.plan"],'+sourceScope+' [data-slot="conversation.input.activity"],'+sourceScope+' [data-slot="conversation.input.left"],'+sourceScope+' [data-slot="conversation.input.right"],'+sourceScope+' [data-slot="conversation.input.overlay"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-slot="conversation.input.attachments"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-composer-card] button[aria-haspopup],'+sourceScope+' [data-composer-dock]{display:none!important}.sab-native,.sab-native-frame{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}.sab-native [data-conversation-content]{flex:1;min-height:0}[data-superagent-native="true"] [data-slot="conversation.session.header"],[data-superagent-native="true"] [data-slot="conversation.session.header.actions"],[data-superagent-native="true"] [data-slot="conversation.session.header.utilities"],[data-superagent-native="true"] [data-slot="conversation.session.header.corner"]{display:none!important}.sab-native-notice{padding:8px 16px;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b)}.sab-source-node{padding:12px 0;overflow-wrap:anywhere}.sab-source-content>:first-child{font-size:inherit!important;line-height:inherit!important;color:inherit!important}.sab-source-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b);margin-bottom:6px}.sab-executions{padding:8px 16px;flex:none;max-height:40%;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.sab-executions button:disabled{opacity:.5;cursor:not-allowed}.sab-executions [data-superagent-trace] pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.sab-executions select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,#fff);padding:6px;max-width:100%}';
-    nativeCss+=sourceScope+' '+HISTORY_UNDO+','+sourceScope+' '+HISTORY_EDIT+'{display:none!important}.sab-transport-status{font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.6;color:var(--dsw-alias-label-secondary,#64748b);padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);border-radius:8px}.sab-transport-status p{margin:4px 0}.sab-transport-uncertain{background:rgba(245,158,11,.08)}.sab-source-quote{margin:0 0 8px;padding:7px 10px 7px 12px;border-left:3px solid var(--dsw-alias-border-l3,#cbd5e1);border-radius:6px;background:var(--dsw-alias-bg-layer-2,#f5f6f8);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.sab-source-quote-label{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-tertiary,#94a3b8);margin-bottom:2px}.sab-source-quote-text{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--dsw-alias-label-secondary,#64748b)}';
+    var nativeCss = sourceScope+' [data-slot="conversation.input.model"],'+sourceScope+' [data-slot="conversation.input.permission"],'+sourceScope+' [data-slot="conversation.input.plan"],'+sourceScope+' [data-slot="conversation.input.activity"],'+sourceScope+' [data-slot="conversation.input.left"],'+sourceScope+' [data-slot="conversation.input.right"],'+sourceScope+' [data-slot="conversation.input.overlay"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-slot="conversation.input.attachments"],'+sourceScope+':not([data-superagent-attachments="true"]) [data-composer-card] button[aria-haspopup],'+sourceScope+' [data-composer-dock]{display:none!important}.sab-native,.sab-native-frame{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}.sab-native-frame{flex-direction:row}.sab-native-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}.sab-native [data-conversation-content]{flex:1;min-height:0}[data-superagent-native="true"] [data-slot="conversation.session.header"],[data-superagent-native="true"] [data-slot="conversation.session.header.actions"],[data-superagent-native="true"] [data-slot="conversation.session.header.utilities"],[data-superagent-native="true"] [data-slot="conversation.session.header.corner"]{display:none!important}.sab-native-notice{padding:8px 16px;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b)}.sab-source-node{padding:12px 0;overflow-wrap:anywhere}.sab-source-content>:first-child{font-size:inherit!important;line-height:inherit!important;color:inherit!important}.sab-source-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b);margin-bottom:6px}.sab-executions{padding:8px 16px;flex:none;max-height:40%;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2,#ddd)}.sab-executions button:disabled{opacity:.5;cursor:not-allowed}.sab-executions [data-superagent-trace] pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.sab-executions select{font:inherit;color:inherit;background:var(--dsw-alias-bg-base,#fff);padding:6px;max-width:100%}';
+    nativeCss+=sourceScope+' '+HISTORY_UNDO+','+sourceScope+' '+HISTORY_EDIT+'{display:none!important}.sab-transport-status{font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.6;color:var(--dsw-alias-label-secondary,#64748b);padding:8px 12px;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);border-radius:8px}.sab-transport-status p{margin:4px 0}.sab-transport-uncertain{background:rgba(245,158,11,.08)}.sab-source-quote{display:block;width:100%;margin:0 0 8px;padding:7px 10px 7px 12px;border:0;border-left:3px solid var(--dsw-alias-border-l3,#cbd5e1);border-radius:6px;background:var(--dsw-alias-bg-layer-2,#f5f6f8);font:inherit;font-size:12px;line-height:1.65;text-align:left;color:inherit;cursor:pointer;overflow-wrap:anywhere}.sab-source-quote:hover{background:var(--dsw-alias-interactive-bg-hover,#eef1f5)}.sab-source-quote:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4f46e5);outline-offset:2px}.sab-source-quote-label{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-tertiary,#94a3b8);margin-bottom:2px}.sab-source-quote-text{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--dsw-alias-label-secondary,#64748b)}.sab-context-pane{width:min(400px,42%);flex:none;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--dsw-alias-border-l2,#dbe3ee);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#172033)}.sab-context-head{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#dbe3ee)}.sab-context-head h2{margin:0;font-size:15px}.sab-context-head p{margin:4px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b)}.sab-context-head button{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);background:var(--dsw-alias-bg-base,#fff);border-radius:9px;min-height:32px;padding:5px 11px;cursor:pointer;flex:none}.sab-context-list{flex:1;min-height:0;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px}.sab-context-row{border:1px solid transparent;border-radius:10px;padding:9px 11px;background:var(--dsw-alias-bg-layer-2,#f5f6f8)}.sab-context-row[data-current="true"]{border-color:var(--dsw-alias-brand-primary,#4f46e5);background:rgba(99,102,241,.08)}.sab-context-row .sab-quote-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--dsw-alias-label-secondary,#64748b);margin-bottom:4px}.sab-quote-tag{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(79,70,229,.12);color:var(--dsw-alias-brand-primary,#4f46e5)}.sab-quote-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6}.sab-context-compose{flex:none;border-top:1px solid var(--dsw-alias-border-l2,#dbe3ee);padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px}.sab-context-label{font-size:12px;color:var(--dsw-alias-label-secondary,#64748b)}.sab-context-compose textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:72px;max-height:220px;font:inherit;font-size:14px;line-height:1.55;padding:9px 10px;border:1px solid var(--dsw-alias-border-l2,#dbe3ee);border-radius:9px;background:var(--dsw-alias-bg-base,#fff);color:inherit}.sab-context-compose textarea:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4f46e5);outline-offset:2px}.sab-context-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sab-context-actions button{font:inherit;color:#fff;background:var(--dsw-alias-brand-primary,#4f46e5);border:1px solid transparent;border-radius:9px;min-height:34px;padding:6px 14px;cursor:pointer}.sab-context-actions button:disabled{opacity:.5;cursor:not-allowed}.sab-context-hint{font-size:11px;color:var(--dsw-alias-label-tertiary,#94a3b8)}.sab-context-compose [role="status"],.sab-context-compose [role="alert"]{margin:0;font-size:12px}.sab-context-compose [role="alert"]{color:#dc2626}';
     function sourceSession(id) { return typeof id === 'string' && id.indexOf(SOURCE_PREFIX) === 0; }
     // Only Host native endpoints publish effective capabilities, never raw Source flags or upload receipts.
     var nativeCapabilities=new Map(), capabilityListeners=new Set(), NO_CAPABILITIES=Object.freeze({attachments:false});
@@ -241,19 +241,76 @@ window.__ModuleLoader__.load({
       }
       return null;
     }
-    function quoteText(value){
-      var text=String(value??'').replace(/\s+/g,' ').trim();
-      return (text.length>220?text.slice(0,220)+'…':text) || '（无文字的消息）';
+    function quoteText(value,max){
+      var text=String(value??'').replace(/\s+/g,' ').trim(),limit=max||220;
+      return (text.length>limit?text.slice(0,limit)+'…':text) || '（无文字的消息）';
+    }
+    var SOURCE_KIND_LABELS={ack:'已接收',acknowledgement:'已接收',answer:'答复',reply:'答复',attention:'需要关注',result:'执行结果',notice:'通知',delivery:'Source 消息'};
+    function sourceKind(entry){return SOURCE_KIND_LABELS[entry.kind] || text(entry.kind,'Source 消息',60);}
+    // A focused topic view: the quoted message, its immediate confirmed neighbours and the
+    // reply that opened the view. Built only from already-loaded Source history; read-only.
+    function contextRows(target,origin){
+      var rows=Array.from(sourceUsers.values()).concat(Array.from(sourceAssistants.values()));
+      rows.sort(function(a,b){return (a.seq||0)-(b.seq||0);});
+      var index=-1;
+      for(var i=0;i<rows.length;i++)if(rows[i].id===target.id&&rows[i].role===target.role){index=i;break;}
+      var window=index<0?[target]:rows.slice(Math.max(0,index-3),index+4);
+      if(origin&&origin.id!==target.id&&!window.some(function(item){return item.id===origin.id;}))window=window.concat([origin]);
+      window.sort(function(a,b){return (a.seq||0)-(b.seq||0);});
+      return window.map(function(item){return {entry:item,current:item.id===target.id&&item.role===target.role,reply:!!origin&&item.id===origin.id};});
+    }
+    // The focused context lives beside the native conversation, not over it, so the operator can
+    // read the quoted message and send a reply scoped to the same context from that pane.
+    var focusedContext={target:null,origin:null},contextListeners=new Set();
+    function publishFocus(value){focusedContext=value;contextListeners.forEach(function(listener){listener();});}
+    function focusContext(target,origin){if(target)publishFocus({target:target,origin:origin});}
+    function closeContext(){publishFocus({target:null,origin:null});}
+    function useContextFocus(){
+      var subscribe=React.useCallback(function(listener){contextListeners.add(listener);return function(){contextListeners.delete(listener);};},[]);
+      var snapshot=React.useCallback(function(){return focusedContext;},[]);
+      return React.useSyncExternalStore(subscribe,snapshot,snapshot);
+    }
+    function ContextPane(props){
+      var target=props.target,origin=props.origin,rows=contextRows(target,origin);
+      var currentRow=React.useRef(null);
+      React.useEffect(function(){if(currentRow.current&&currentRow.current.scrollIntoView)currentRow.current.scrollIntoView({block:'center'});},[target.id,target.role]);
+      var draft=React.useState(''),text=draft[0],setText=draft[1];
+      var status=React.useState(''),notice=status[0],setNotice=status[1];
+      var errors=React.useState(''),error=errors[0],setError=errors[1];
+      function send(){
+        var value=text.trim();
+        if(!value)return;
+        var input=props.context&&typeof props.sessionId==='string'?sourceInput(props.context,props.sessionId):null;
+        if(!input){setError('原生会话尚未就绪，草稿保留。');return;}
+        // Prefix the confirmed quote explicitly: the Source relay carries text, so the WSL
+        // SuperAgent receives the context with the message instead of an unattached draft quote.
+        input.setDraft('> '+String(target.text??'').replace(/\n/g,'\n> ')+'\n\n'+value);
+        input.submit('queue','click');
+        setText('');setNotice('已发送，只针对这段上下文。');setError('');
+      }
+      return h('aside',{className:'sab-context-pane','aria-label':'消息上下文'},
+        h('header',{className:'sab-context-head'},h('div',null,h('h2',null,'消息上下文'),h('p',null,'这条消息及其前后的已确认内容；在下面发送只针对这段上下文。')),
+          h('button',{type:'button','aria-label':'关闭消息上下文',onClick:props.onClose},'关闭')),
+        h('div',{className:'sab-context-list'},rows.map(function(row){
+          return h('article',{key:row.entry.role+':'+row.entry.id+':'+row.entry.seq,className:'sab-context-row','data-superagent-context-row':true,'data-current':row.current?'true':undefined,'data-reply':row.reply?'true':undefined,ref:row.current?currentRow:undefined},
+            h('div',{className:'sab-quote-meta'},h('strong',null,row.entry.role==='user'?'你':agentName()),h('span',null,sourceKind(row.entry)),h('span',null,when(row.entry.at)),
+              row.current&&h('span',{className:'sab-quote-tag'},'当前消息'),row.reply&&h('span',{className:'sab-quote-tag'},'正在查看')),
+            h('div',{className:'sab-quote-body'},String(row.entry.text??'').slice(0,8000)||'（无文字的消息）'));
+        })),
+        h('div',{className:'sab-context-compose'},
+          h('label',{className:'sab-context-label',htmlFor:'sab-context-input'},'只回复这段上下文'),
+          h('textarea',{id:'sab-context-input','aria-label':'只回复这段上下文',rows:3,value:text,placeholder:'输入消息，Enter 发送，Shift+Enter 换行',onChange:function(event){setText(event.target.value);setNotice('');setError('');},onKeyDown:function(event){if(event.key==='Enter'&&!event.shiftKey&&!(event.nativeEvent&&event.nativeEvent.isComposing)&&event.keyCode!==229){event.preventDefault();send();}}}),
+          h('div',{className:'sab-context-actions'},h('button',{type:'button',disabled:!text.trim(),onClick:send},'发送'),h('span',{className:'sab-context-hint'},'发送时会带上这条消息的引用。')),
+          notice&&h('p',{role:'status'},notice),error&&h('p',{role:'alert'},error)));
     }
     function SourceNode(props) {
       useIdentity();
-      var entry=props.node.data, kinds={ack:'已接收',acknowledgement:'已接收',answer:'答复',reply:'答复',attention:'需要关注',result:'执行结果',notice:'通知',delivery:'Source 消息'};
-      var quote=replyTarget(entry);
+      var entry=props.node.data, quote=replyTarget(entry);
       return h('section',{className:'sab-source-node','data-superagent-source':entry.id},
-        h('div',{className:'sab-source-meta'},h('strong',null,agentName()),h('span',null,kinds[entry.kind] || text(entry.kind,'Source 消息',60)),h('span',null,when(entry.at)),entry.ticketId && h('code',null,text(entry.ticketId,'',128))),
-        quote && h('blockquote',{className:'sab-source-quote','data-superagent-reply-to':quote.id,title:'回复的消息'},
-          h('div',{className:'sab-source-quote-label'},h('span',null,'回复你的消息'),h('span',null,when(quote.at))),
-          h('div',{className:'sab-source-quote-text'},quoteText(quote.text))),
+        h('div',{className:'sab-source-meta'},h('strong',null,agentName()),h('span',null,sourceKind(entry)),h('span',null,when(entry.at)),entry.ticketId && h('code',null,text(entry.ticketId,'',128))),
+        quote && h('button',{type:'button',className:'sab-source-quote','data-superagent-reply-to':quote.id,title:'在右侧查看这条消息的上下文',onClick:function(){focusContext(quote,entry);}},
+          h('span',{className:'sab-source-quote-label'},h('span',null,'回复你的消息'),h('span',null,when(quote.at))),
+          h('span',{className:'sab-source-quote-text'},quoteText(quote.text))),
         // The public text-only Factory is compact by default; Source deliveries are not model reasoning.
         h('div',{className:'sab-source-content','data-superagent-delivery-content':true,style:{fontSize:'var(--dsh-content-font-size,14px)',lineHeight:'calc(24px + var(--dsh-content-font-delta,0px))',color:'var(--dsw-alias-label-primary,#172033)'}},
           props.renderFactorySlot('conversation.chat.reasoning.content',{text:sourceText(entry.text),running:false})));
@@ -547,9 +604,12 @@ window.__ModuleLoader__.load({
         notice && h('p',{role:'status'},notice),error && h('p',{role:'alert'},error));
     }
     function nativeBody(props) {
+      var focus=useContextFocus();
       return h('div',{className:'sab-native-frame'},
-        props.renderFactorySlot('conversation.content',{variant:'embedded',phase:'active',hero:false},{fallback:h('div',{role:'alert',className:'sab-notice sab-error'},'原生 Conversation Factory 不可用；不会改用普通 Agent。')}),
-        h(Executions,{context:props.context,sessionId:props.sessionId}));
+        h('div',{className:'sab-native-main'},
+          props.renderFactorySlot('conversation.content',{variant:'embedded',phase:'active',hero:false},{fallback:h('div',{role:'alert',className:'sab-notice sab-error'},'原生 Conversation Factory 不可用；不会改用普通 Agent。')}),
+          h(Executions,{context:props.context,sessionId:props.sessionId})),
+        focus.target && h(ContextPane,{context:props.context,sessionId:props.sessionId,target:focus.target,origin:focus.origin,onClose:closeContext}));
     }
     function Chat(props) {
       var state=React.useState({reference:null,error:'',loading:true}), value=state[0], setValue=state[1];
