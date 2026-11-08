@@ -930,6 +930,45 @@ test('a ticket-level result quotes the message its ticket started from, even bef
   app.dispose()
 })
 
+test('clicking a reply quote opens a right-side context pane and sends only to that context', async () => {
+  const app = fixture(), root = app.mount()
+  const request = { ...reply, id: 'trigger-context', role: 'user', kind: 'request', text: '原始请求：把答复界面改成话题式。', at: '2026-11-08T02:33:17.035Z' }
+  const ack = { id: outboxKey('ack', request.id), role: 'assistant', kind: 'acknowledgement', text: '收到：先确认消息上下文。', at: '2026-11-08T02:33:55.378Z' }
+  app.backend.messages = [request, ack]
+  await app.flush()
+  const quote = one(root, node => node.props['data-superagent-reply-to'] !== undefined)
+  assert.equal(quote.type, 'button')
+  assert.equal(quote.props.title, '在右侧查看这条消息的上下文')
+  assert.equal(nodes(root.tree, node => node.type === 'aside').length, 0)
+  quote.props.onClick()
+  await app.flush()
+  const pane = one(root, node => node.type === 'aside' && node.props['aria-label'] === '消息上下文')
+  const rows = nodes(pane, node => node.props['data-superagent-context-row'] === true)
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].props['data-current'], 'true')
+  assert.match(contents(rows[0]), /原始请求：把答复界面改成话题式/)
+  assert.equal(rows[1].props['data-reply'], 'true')
+  assert.match(contents(rows[1]), /先确认消息上下文/)
+  const textarea = nodes(pane, node => node.type === 'textarea')[0]
+  assert.equal(textarea.props['aria-label'], '只回复这段上下文')
+  textarea.props.onChange({ target: { value: '只补充这条消息' } })
+  await app.flush()
+  const paneAfter = one(root, node => node.type === 'aside' && node.props['aria-label'] === '消息上下文')
+  const send = nodes(paneAfter, node => node.type === 'button' && contents(node) === '发送')[0]
+  assert.equal(send.props.disabled, false)
+  send.props.onClick()
+  await app.flush()
+  assert.match(app.inputSnapshot.draft, /^> 原始请求：把答复界面改成话题式。\n\n只补充这条消息$/)
+  assert.deepEqual(app.inputCalls.at(-1), ['queue', 'click'])
+  const paneSent = one(root, node => node.type === 'aside' && node.props['aria-label'] === '消息上下文')
+  assert.equal(nodes(paneSent, node => node.props.role === 'status' && /已发送/.test(contents(node))).length, 1)
+  const close = one(root, node => node.type === 'button' && node.props['aria-label'] === '关闭消息上下文')
+  close.props.onClick()
+  await app.flush()
+  assert.equal(nodes(root.tree, node => node.type === 'aside').length, 0)
+  app.dispose()
+})
+
 test('a Source reply with no resolvable human message stays unquoted instead of guessing by position', async () => {
   const app = fixture(), root = app.mount()
   app.backend.messages = [
